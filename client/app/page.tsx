@@ -4,6 +4,19 @@ import { useEffect, useRef, useState } from "react";
 import { socket } from "../lib/socket";
 import { gsap } from "gsap";
 import { BOARD, BOARD_LAYOUT } from "./constants";
+import Dice from "./Dice";
+
+const tileColors = {
+  love: "from-pink-500/30 to-red-500/30",
+  dare: "from-yellow-400/30 to-orange-500/30",
+  memory: "from-purple-500/30 to-indigo-500/30",
+  gift: "from-green-400/30 to-emerald-500/30",
+  start: "from-gray-500/30 to-gray-700/30",
+};
+
+gsap.defaults({
+  overwrite: "auto",
+});
 
 export default function Home() {
   const [username, setUsername] = useState("");
@@ -11,15 +24,16 @@ export default function Home() {
   const [game, setGame] = useState(null);
   const [currentTile, setCurrentTile] = useState(null);
   const [currentQuestion, setCurrentQuestion] = useState("");
+  const [diceValue, setDiceValue] = useState(1);
+  const [isRolling, setIsRolling] = useState(false);
 
   const tileRefs = useRef({});
   const playerRefs = useRef({});
   const boardRef = useRef(null);
   const isAnimating = useRef(false);
 
-  /* =========================
-     INITIAL POSITION SET
-  ========================= */
+  const isMyTurn = game?.players?.[game?.turn]?.id === socket.id;
+
   const setInitialPositions = (room) => {
     const boardRect = boardRef.current.getBoundingClientRect();
 
@@ -39,9 +53,6 @@ export default function Home() {
     });
   };
 
-  /* =========================
-     ANIMATION (LUDO STYLE)
-  ========================= */
   const animateSteps = (playerId, steps, callback) => {
     if (isAnimating.current) return;
 
@@ -74,12 +85,37 @@ export default function Home() {
         duration: 0.35,
         ease: "power2.inOut",
       });
+
+      tl.to(
+        tileEl,
+        {
+          scale: 1.15,
+          duration: 0.15,
+          yoyo: true,
+          repeat: 1,
+          ease: "power1.out",
+        },
+        "<",
+      );
+
+      const lastTile = steps[steps.length - 1];
+      const lastTileEl = tileRefs.current[lastTile];
+
+      if (lastTileEl) {
+        gsap.fromTo(
+          lastTileEl,
+          { boxShadow: "0 0 0px rgba(255,255,255,0)" },
+          {
+            boxShadow: "0 0 25px rgba(255,255,255,0.6)",
+            duration: 0.4,
+            yoyo: true,
+            repeat: 1,
+          },
+        );
+      }
     });
   };
 
-  /* =========================
-     SOCKET EVENTS
-  ========================= */
   useEffect(() => {
     socket.on("roomCreated", ({ roomId }) => {
       setRoomId(roomId);
@@ -94,7 +130,6 @@ export default function Home() {
     });
 
     socket.on("gameUpdate", ({ steps, playerId, question, tileType, room }) => {
-      // animate first → then update UI
       animateSteps(playerId, steps, () => {
         setGame(room);
         setCurrentTile({ type: tileType });
@@ -105,9 +140,6 @@ export default function Home() {
     return () => socket.off();
   }, []);
 
-  /* =========================
-     ACTIONS
-  ========================= */
   const createRoom = () => {
     socket.emit("createRoom", { username });
   };
@@ -117,42 +149,185 @@ export default function Home() {
   };
 
   const rollDice = () => {
-    if (isAnimating.current) return;
+    if (!isMyTurn) return; // 🚨 IMPORTANT FIX
+    if (isAnimating.current || isRolling) return;
 
-    gsap.to(".dice", {
-      rotate: 720,
-      duration: 0.6,
-    });
+    setIsRolling(true);
 
-    setTimeout(() => {
-      socket.emit("rollDice", { roomId });
-    }, 500);
+    const diceEl = document.querySelector(".dice");
+
+    gsap.fromTo(
+      diceEl,
+      { rotate: 0, scale: 1 },
+      {
+        rotate: 720,
+        scale: 1.2,
+        duration: 0.6,
+        ease: "power2.out",
+      },
+    );
+
+    socket.emit("rollDice", { roomId });
   };
 
-  /* =========================
-     QUESTION ANIMATION
-  ========================= */
+  const playerStyles = [
+    "bg-gradient-to-br from-pink-500 to-red-500 shadow-pink-500/50",
+    "bg-gradient-to-br from-blue-500 to-cyan-400 shadow-blue-500/50",
+  ];
+
   useEffect(() => {
-    if (currentQuestion) {
+    const ctx = gsap.context(() => {
+      gsap.to(".player-float", {
+        y: "+=6",
+        repeat: -1,
+        yoyo: true,
+        duration: 1,
+        ease: "sine.inOut",
+        overwrite: "auto",
+      });
+    });
+
+    return () => ctx.revert();
+  }, []);
+
+  useEffect(() => {
+    const tiles = gsap.utils.toArray(".tile");
+
+    if (!tiles.length) return;
+
+    gsap.from(tiles, {
+      scale: 0,
+      opacity: 0,
+      stagger: 0.03,
+      duration: 0.4,
+      ease: "back.out(1.7)",
+      overwrite: "auto",
+    });
+
+    return () => gsap.killTweensOf(tiles);
+  }, []);
+
+  useEffect(() => {
+    if (!currentQuestion) return;
+
+    const ctx = gsap.context(() => {
       gsap.fromTo(
         ".question-card",
-        { y: 100, opacity: 0 },
-        { y: 0, opacity: 1, duration: 0.5 },
+        { y: 200, opacity: 0, scale: 0.8 },
+        {
+          y: 0,
+          opacity: 1,
+          scale: 1,
+          duration: 0.6,
+          ease: "elastic.out(1, 0.5)",
+        },
       );
-    }
+
+      gsap.to(".question-card", {
+        boxShadow: "0 0 30px rgba(255,0,150,0.4)",
+        duration: 1,
+        repeat: 3,
+        yoyo: true,
+      });
+    });
+
+    return () => ctx.revert();
   }, [currentQuestion]);
 
-  /* =========================
-     UI
-  ========================= */
+  // useEffect(() => {
+  //   if (!game) return;
+
+  //   const currentId = game.players?.[game.turn]?.id;
+  //   const el = playerRefs.current[currentId];
+
+  //   if (!el) return;
+
+  //   // kill previous animations to avoid stacking
+  //   gsap.killTweensOf(el);
+
+  //   gsap.fromTo(
+  //     el,
+  //     {
+  //       scale: 1,
+  //       boxShadow: "0 0 0px rgba(255,255,255,0)",
+  //     },
+  //     {
+  //       scale: 1.35,
+  //       boxShadow: "0 0 20px rgba(255,255,255,0.8)",
+  //       repeat: -1,
+  //       yoyo: true,
+  //       duration: 0.7,
+  //       ease: "sine.inOut",
+  //     },
+  //   );
+  // }, [game?.turn]);
+
+  useEffect(() => {
+    if (!game) return;
+
+    const currentId = game.players?.[game.turn]?.id;
+
+    // 1. STOP animation on ALL players first
+    Object.values(playerRefs.current).forEach((el) => {
+      if (!el) return;
+
+      gsap.killTweensOf(el);
+
+      gsap.set(el, {
+        scale: 1,
+        boxShadow: "0 0 0px rgba(255,255,255,0)",
+      });
+    });
+
+    // 2. Animate ONLY current player
+    const currentEl = playerRefs.current[currentId];
+    if (!currentEl) return;
+
+    gsap.fromTo(
+      currentEl,
+      {
+        scale: 1,
+        boxShadow: "0 0 0px rgba(255,255,255,0)",
+      },
+      {
+        scale: 1.35,
+        boxShadow: "0 0 20px rgba(255,255,255,0.8)",
+        repeat: -1,
+        yoyo: true,
+        duration: 0.7,
+        ease: "sine.inOut",
+      },
+    );
+  }, [game?.turn, game?.players]);
+
+  useEffect(() => {
+    socket.on("diceRolling", ({ playerId }) => {
+      // only animate if it's current player OR show global animation if you want
+      setIsRolling(true);
+    });
+
+    socket.on("diceRolled", ({ dice, playerId }) => {
+      setDiceValue(dice);
+      setIsRolling(false);
+    });
+
+    return () => {
+      socket.off("diceRolling");
+      socket.off("diceRolled");
+    };
+  }, []);
+
   return (
-    <div className="min-h-screen p-10">
+    <div className="min-h-screen p-10 bg-gradient-to-br from-[#0f172a] via-[#1e293b] to-black text-white relative overflow-hidden">
+      {/* ✅ FIX: pointer-events-none added */}
+      <div className="absolute inset-0 opacity-20 pointer-events-none bg-[radial-gradient(circle_at_20%_20%,white,transparent)]" />
+
       {!game ? (
         <div>
           <input
-            placeholder="Your name"
+            value={username}
             onChange={(e) => setUsername(e.target.value)}
-            className="border p-2"
+            className="border p-2 text-black"
           />
 
           <div className="mt-4">
@@ -163,9 +338,9 @@ export default function Home() {
 
           <div className="mt-4">
             <input
-              placeholder="Room ID"
+              value={roomId}
               onChange={(e) => setRoomId(e.target.value)}
-              className="border p-2"
+              className="border p-2 text-black"
             />
             <button onClick={joinRoom} className="bg-green-500 p-2 ml-2">
               Join Room
@@ -176,16 +351,13 @@ export default function Home() {
         </div>
       ) : (
         <div>
-          {/* BOARD */}
           <div className="flex justify-center">
             <div
               ref={boardRef}
               className="relative grid grid-cols-5 w-[500px] h-[500px]"
             >
               {BOARD_LAYOUT.map((tileIndex, i) => {
-                if (tileIndex === null) {
-                  return <div key={i} />;
-                }
+                if (tileIndex === null) return <div key={i} />;
 
                 const tile = BOARD[tileIndex];
 
@@ -193,24 +365,41 @@ export default function Home() {
                   <div
                     key={i}
                     ref={(el) => (tileRefs.current[tileIndex] = el)}
-                    className="border flex items-center justify-center"
+                    className={`tile hover:scale-105 transition-transform duration-200 relative flex items-center justify-center rounded-xl border border-white/10 bg-gradient-to-br ${tileColors[tile.type]} shadow-[0_8px_20px_rgba(0,0,0,0.3)]`}
                   >
-                    <span className="text-xs">{tile.label}</span>
+                    <span className="text-xs text-white/80 text-center px-1">
+                      {tile.label}
+                    </span>
                   </div>
                 );
               })}
 
-              {/* ✅ PLAYERS LAYER (ONLY ONCE) */}
               <div className="absolute top-0 left-0 w-full h-full pointer-events-none">
                 {game.players.map((p, idx) => (
                   <div
                     key={p.id}
                     ref={(el) => (playerRefs.current[p.id] = el)}
-                    className="absolute text-2xl"
+                    className={`player-float absolute w-9 h-9 rounded-full ${playerStyles[idx]} flex items-center justify-center`}
                   >
-                    {idx === 0 ? "🧍" : "🧑"}
+                    {p.username?.[0]?.toUpperCase()}
                   </div>
                 ))}
+              </div>
+
+              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-auto">
+                <div
+                  className={`bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/20 shadow-xl flex flex-col items-center gap-2 transition ${
+                    !isMyTurn
+                      ? "opacity-40 cursor-not-allowed"
+                      : "cursor-pointer"
+                  }`}
+                  onClick={rollDice}
+                >
+                  <Dice value={diceValue} rolling={isRolling} />
+                </div>
+                <p className="text-xs text-white/70 pt-4">
+                  {isMyTurn ? "Your turn 🎯" : "Waiting for opponent..."}
+                </p>
               </div>
             </div>
           </div>
@@ -225,15 +414,22 @@ export default function Home() {
             ))}
           </div>
 
-          <button onClick={rollDice} className="bg-purple-500 p-3 mt-4">
-            Roll Dice 🎲
-          </button>
+          {/* <Dice value={diceValue} rolling={isRolling} /> */}
 
-          {/* QUESTION */}
+          {/* <button
+            onClick={rollDice}
+            disabled={!isMyTurn}
+            className="bg-purple-500 p-3 mt-4"
+          >
+            Roll Dice 🎲
+          </button> */}
+
           {currentTile && currentTile.type !== "start" && (
-            <div className="question-card fixed bottom-10 left-1/2 -translate-x-1/2 bg-white p-6 shadow-xl">
-              <h2>{currentTile.type}</h2>
-              <p>{currentQuestion}</p>
+            <div className="question-card fixed top-10 left-40 -translate-x-1/2 w-[250px] p-6 rounded-2xl bg-gradient-to-br from-purple-600 via-pink-500 to-red-500 text-white">
+              <h2 className="text-xl font-bold mb-2">
+                {currentTile.type.toUpperCase()}
+              </h2>
+              <p className="text-lg">{currentQuestion}</p>
             </div>
           )}
         </div>

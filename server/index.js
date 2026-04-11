@@ -134,9 +134,67 @@ io.on("connection", (socket) => {
   });
 
   /* -------- ROLL DICE -------- */
+  // socket.on("rollDice", ({ roomId }) => {
+
+  //   const room = rooms[roomId];
+
+  //   if (!room) return;
+
+  //   const currentPlayer = room.players[room.turn];
+
+  //   if (currentPlayer.id !== socket.id) {
+  //     socket.emit("errorMessage", "Not your turn");
+  //     return;
+  //   }
+
+  //   // 🎲 Roll dice
+  //   const dice = Math.floor(Math.random() * 6) + 1;
+
+  //   const steps = [];
+
+  //   let current = room.positions[socket.id];
+
+  //   for (let i = 0; i < dice; i++) {
+  //     current = (current + 1) % BOARD.length;
+  //     steps.push(current);
+  //   }
+
+  //   room.positions[socket.id] = current;
+
+  //   const newPosition = room.positions[socket.id];
+  //   const tileType = BOARD[newPosition];
+
+  //   // 🎯 Generate SAME question for both users
+  //   let question = null;
+  //   if (tileType !== "start") {
+  //     question = getRandomQuestion(tileType);
+  //   }
+
+  //   // 🧠 Save state (important for sync)
+  //   room.currentTile = tileType;
+  //   room.currentQuestion = question;
+
+  //   // 🧮 Score logic (simple for now)
+  //   room.scores[socket.id] += 10;
+
+  //   // 🔄 Next turn
+  //   room.turn = (room.turn + 1) % room.players.length;
+
+  //   console.log(`🎲 Dice: ${dice}, Player: ${socket.id}, Tile: ${tileType}`);
+
+  //   // 📡 Emit to BOTH players
+  //   io.to(roomId).emit("gameUpdate", {
+  //     dice,
+  //     room,
+  //     steps,
+  //     playerId: socket.id, // ✅ ADD THIS
+  //     tileType,
+  //     question,
+  //   });
+  // });
+
   socket.on("rollDice", ({ roomId }) => {
     const room = rooms[roomId];
-
     if (!room) return;
 
     const currentPlayer = room.players[room.turn];
@@ -146,50 +204,59 @@ io.on("connection", (socket) => {
       return;
     }
 
-    // 🎲 Roll dice
+    // 🎲 STEP 1: generate dice
     const dice = Math.floor(Math.random() * 6) + 1;
 
-    const steps = [];
+    console.log(`🎲 Dice rolled: ${dice}`);
 
-    let current = room.positions[socket.id];
-
-    for (let i = 0; i < dice; i++) {
-      current = (current + 1) % BOARD.length;
-      steps.push(current);
-    }
-
-    room.positions[socket.id] = current;
-
-    const newPosition = room.positions[socket.id];
-    const tileType = BOARD[newPosition];
-
-    // 🎯 Generate SAME question for both users
-    let question = null;
-    if (tileType !== "start") {
-      question = getRandomQuestion(tileType);
-    }
-
-    // 🧠 Save state (important for sync)
-    room.currentTile = tileType;
-    room.currentQuestion = question;
-
-    // 🧮 Score logic (simple for now)
-    room.scores[socket.id] += 10;
-
-    // 🔄 Next turn
-    room.turn = (room.turn + 1) % room.players.length;
-
-    console.log(`🎲 Dice: ${dice}, Player: ${socket.id}, Tile: ${tileType}`);
-
-    // 📡 Emit to BOTH players
-    io.to(roomId).emit("gameUpdate", {
-      dice,
-      room,
-      steps,
-      playerId: socket.id, // ✅ ADD THIS
-      tileType,
-      question,
+    // 👉 OPTIONAL: tell both players dice started rolling
+    io.to(roomId).emit("diceRolling", {
+      playerId: socket.id,
     });
+
+    // ⏳ simulate real dice delay (like Ludo)
+    setTimeout(() => {
+      // 🧮 calculate steps
+      const steps = [];
+      let current = room.positions[socket.id];
+
+      for (let i = 0; i < dice; i++) {
+        current = (current + 1) % BOARD.length;
+        steps.push(current);
+      }
+
+      room.positions[socket.id] = current;
+
+      const newPosition = current;
+      const tileType = BOARD[newPosition];
+
+      let question = null;
+      if (tileType !== "start") {
+        question = getRandomQuestion(tileType);
+      }
+
+      room.currentTile = tileType;
+      room.currentQuestion = question;
+
+      room.scores[socket.id] += 10;
+      room.turn = (room.turn + 1) % room.players.length;
+
+      // 🎯 STEP 2: send FINAL dice result
+      io.to(roomId).emit("diceRolled", {
+        playerId: socket.id,
+        dice,
+      });
+
+      // 🎯 STEP 3: send game update AFTER dice
+      io.to(roomId).emit("gameUpdate", {
+        dice,
+        room,
+        steps,
+        playerId: socket.id,
+        tileType,
+        question,
+      });
+    }, 700); // matches dice animation time
   });
 
   /* -------- DISCONNECT -------- */

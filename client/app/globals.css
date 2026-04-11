@@ -24,3 +24,58 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+.perspective {
+  perspective: 600px;
+}
+
+.dice-cube {
+  transform-style: preserve-3d;
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  background: black;
+  border-radius: 50%;
+  position: absolute;
+}
+
+/* dot positions */
+.dot-center {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.dot-top-left {
+  top: 20%;
+  left: 20%;
+}
+
+.dot-top-right {
+  top: 20%;
+  right: 20%;
+}
+
+.dot-bottom-left {
+  bottom: 20%;
+  left: 20%;
+}
+
+.dot-bottom-right {
+  bottom: 20%;
+  right: 20%;
+}
+
+.dot-middle-left {
+  top: 50%;
+  left: 20%;
+  transform: translateY(-50%);
+}
+
+.dot-middle-right {
+  top: 50%;
+  right: 20%;
+  transform: translateY(-50%);
+}
