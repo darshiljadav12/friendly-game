@@ -137,7 +137,6 @@ io.on("connection", (socket) => {
   socket.on("rollDice", ({ roomId }) => {
     const room = rooms[roomId];
 
-    console.log({ roomId, room, rooms });
     if (!room) return;
 
     const currentPlayer = room.players[room.turn];
@@ -150,9 +149,16 @@ io.on("connection", (socket) => {
     // 🎲 Roll dice
     const dice = Math.floor(Math.random() * 6) + 1;
 
-    // 📍 Update position (loop board)
-    room.positions[socket.id] =
-      (room.positions[socket.id] + dice) % BOARD.length;
+    const steps = [];
+
+    let current = room.positions[socket.id];
+
+    for (let i = 0; i < dice; i++) {
+      current = (current + 1) % BOARD.length;
+      steps.push(current);
+    }
+
+    room.positions[socket.id] = current;
 
     const newPosition = room.positions[socket.id];
     const tileType = BOARD[newPosition];
@@ -179,9 +185,10 @@ io.on("connection", (socket) => {
     io.to(roomId).emit("gameUpdate", {
       dice,
       room,
+      steps,
+      playerId: socket.id, // ✅ ADD THIS
       tileType,
       question,
-      position: newPosition,
     });
   });
 
