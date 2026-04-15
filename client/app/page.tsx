@@ -7,11 +7,31 @@ import { BOARD, BOARD_LAYOUT } from "./constants";
 import Dice from "./Dice";
 
 const tileColors = {
-  love: "from-pink-500/30 to-red-500/30",
-  dare: "from-yellow-400/30 to-orange-500/30",
-  memory: "from-purple-500/30 to-indigo-500/30",
-  gift: "from-green-400/30 to-emerald-500/30",
-  start: "from-gray-500/30 to-gray-700/30",
+  love: {
+    bg: "bg-pink-950/40",
+    bar: "bg-pink-500",
+    glow: "shadow-pink-500/20",
+  },
+  dare: {
+    bg: "bg-orange-950/40",
+    bar: "bg-orange-500",
+    glow: "shadow-orange-500/20",
+  },
+  memory: {
+    bg: "bg-indigo-950/40",
+    bar: "bg-indigo-500",
+    glow: "shadow-indigo-500/20",
+  },
+  gift: {
+    bg: "bg-emerald-950/40",
+    bar: "bg-emerald-500",
+    glow: "shadow-emerald-500/20",
+  },
+  start: {
+    bg: "bg-slate-800/60",
+    bar: "bg-yellow-400",
+    glow: "shadow-yellow-400/20",
+  },
 };
 
 gsap.defaults({
@@ -31,9 +51,18 @@ export default function Home() {
   const playerRefs = useRef({});
   const boardRef = useRef(null);
   const isAnimating = useRef(false);
+  const prevScores = useRef({});
 
   const isMyTurn = game?.players?.[game?.turn]?.id === socket.id;
 
+  const playerStyles = [
+    "bg-gradient-to-br from-pink-500 to-red-500 shadow-pink-500/50",
+    "bg-gradient-to-br from-blue-500 to-cyan-400 shadow-blue-500/50",
+  ];
+
+  // ---------------------------
+  // INIT POSITIONING
+  // ---------------------------
   const setInitialPositions = (room) => {
     const boardRect = boardRef.current.getBoundingClientRect();
 
@@ -53,6 +82,9 @@ export default function Home() {
     });
   };
 
+  // ---------------------------
+  // MOVE ANIMATION
+  // ---------------------------
   const animateSteps = (playerId, steps, callback) => {
     if (isAnimating.current) return;
 
@@ -66,7 +98,7 @@ export default function Home() {
     const tl = gsap.timeline({
       onComplete: () => {
         isAnimating.current = false;
-        callback && callback();
+        callback?.();
       },
     });
 
@@ -116,6 +148,39 @@ export default function Home() {
     });
   };
 
+  // ---------------------------
+  // SOCKETS
+  // ---------------------------
+
+  useEffect(() => {
+    if (!game) return;
+
+    game.players.forEach((p) => {
+      const prev = prevScores.current[p.id] || 0;
+      const curr = game.scores[p.id];
+
+      if (curr > prev) {
+        const el = document.getElementById(`score-${p.id}`);
+
+        if (el) {
+          gsap.fromTo(
+            el,
+            { scale: 1, color: "#fde047" },
+            {
+              scale: 1.6,
+              duration: 0.2,
+              yoyo: true,
+              repeat: 1,
+              ease: "back.out(2)",
+            },
+          );
+        }
+      }
+
+      prevScores.current[p.id] = curr;
+    });
+  }, [game?.scores]);
+
   useEffect(() => {
     socket.on("roomCreated", ({ roomId }) => {
       setRoomId(roomId);
@@ -137,9 +202,21 @@ export default function Home() {
       });
     });
 
+    socket.on("diceRolling", () => {
+      setIsRolling(true);
+    });
+
+    socket.on("diceRolled", ({ dice }) => {
+      setDiceValue(dice);
+      setIsRolling(false);
+    });
+
     return () => socket.off();
   }, []);
 
+  // ---------------------------
+  // ACTIONS
+  // ---------------------------
   const createRoom = () => {
     socket.emit("createRoom", { username });
   };
@@ -149,7 +226,7 @@ export default function Home() {
   };
 
   const rollDice = () => {
-    if (!isMyTurn) return; // 🚨 IMPORTANT FIX
+    if (!isMyTurn) return;
     if (isAnimating.current || isRolling) return;
 
     setIsRolling(true);
@@ -170,41 +247,19 @@ export default function Home() {
     socket.emit("rollDice", { roomId });
   };
 
-  const playerStyles = [
-    "bg-gradient-to-br from-pink-500 to-red-500 shadow-pink-500/50",
-    "bg-gradient-to-br from-blue-500 to-cyan-400 shadow-blue-500/50",
-  ];
-
   useEffect(() => {
     const ctx = gsap.context(() => {
       gsap.to(".player-float", {
-        y: "+=6",
+        y: "+=4",
         repeat: -1,
         yoyo: true,
-        duration: 1,
+        duration: 1.4,
         ease: "sine.inOut",
-        overwrite: "auto",
+        stagger: 0.1,
       });
     });
 
     return () => ctx.revert();
-  }, []);
-
-  useEffect(() => {
-    const tiles = gsap.utils.toArray(".tile");
-
-    if (!tiles.length) return;
-
-    gsap.from(tiles, {
-      scale: 0,
-      opacity: 0,
-      stagger: 0.03,
-      duration: 0.4,
-      ease: "back.out(1.7)",
-      overwrite: "auto",
-    });
-
-    return () => gsap.killTweensOf(tiles);
   }, []);
 
   useEffect(() => {
@@ -233,34 +288,6 @@ export default function Home() {
 
     return () => ctx.revert();
   }, [currentQuestion]);
-
-  // useEffect(() => {
-  //   if (!game) return;
-
-  //   const currentId = game.players?.[game.turn]?.id;
-  //   const el = playerRefs.current[currentId];
-
-  //   if (!el) return;
-
-  //   // kill previous animations to avoid stacking
-  //   gsap.killTweensOf(el);
-
-  //   gsap.fromTo(
-  //     el,
-  //     {
-  //       scale: 1,
-  //       boxShadow: "0 0 0px rgba(255,255,255,0)",
-  //     },
-  //     {
-  //       scale: 1.35,
-  //       boxShadow: "0 0 20px rgba(255,255,255,0.8)",
-  //       repeat: -1,
-  //       yoyo: true,
-  //       duration: 0.7,
-  //       ease: "sine.inOut",
-  //     },
-  //   );
-  // }, [game?.turn]);
 
   useEffect(() => {
     if (!game) return;
@@ -300,61 +327,150 @@ export default function Home() {
     );
   }, [game?.turn, game?.players]);
 
-  useEffect(() => {
-    socket.on("diceRolling", ({ playerId }) => {
-      // only animate if it's current player OR show global animation if you want
-      setIsRolling(true);
-    });
-
-    socket.on("diceRolled", ({ dice, playerId }) => {
-      setDiceValue(dice);
-      setIsRolling(false);
-    });
-
-    return () => {
-      socket.off("diceRolling");
-      socket.off("diceRolled");
-    };
-  }, []);
-
+  // ---------------------------
+  // RENDER
+  // ---------------------------
   return (
-    <div className="min-h-screen p-10 bg-gradient-to-br from-[#0f172a] via-[#1e293b] to-black text-white relative overflow-hidden">
-      {/* ✅ FIX: pointer-events-none added */}
+    <div className="min-h-screen p-10 bg-gradient-to-br from-[#0f172a] via-[#1e293b] to-black text-white">
+      {/* BACKGROUND GLOW */}
       <div className="absolute inset-0 opacity-20 pointer-events-none bg-[radial-gradient(circle_at_20%_20%,white,transparent)]" />
 
+      {/* LOGIN SCREEN */}
       {!game ? (
-        <div>
-          <input
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            className="border p-2 text-black"
-          />
+        <div className="relative z-10 flex items-center justify-center">
+          <div className="w-[380px] bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl p-6 shadow-2xl space-y-4">
+            <h1 className="text-2xl font-bold text-center">🎮 Game Lobby</h1>
 
-          <div className="mt-4">
-            <button onClick={createRoom} className="bg-blue-500 p-2">
-              Create Room
+            <p className="text-center text-white/60 text-sm">
+              Enter your details to join the arena
+            </p>
+
+            {/* USERNAME */}
+            <div>
+              <label className="text-xs text-white/60">Player Name</label>
+              <input
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                className="w-full mt-1 p-3 rounded-xl bg-white/10 border border-white/20 text-white outline-none focus:ring-2 focus:ring-pink-500"
+                placeholder="e.g. Alex"
+              />
+            </div>
+
+            {/* CREATE ROOM */}
+            <button
+              onClick={createRoom}
+              className="w-full bg-gradient-to-r from-pink-500 to-purple-600 p-3 rounded-xl font-semibold hover:scale-[1.02] transition"
+            >
+              Create New Room
             </button>
-          </div>
 
-          <div className="mt-4">
-            <input
-              value={roomId}
-              onChange={(e) => setRoomId(e.target.value)}
-              className="border p-2 text-black"
-            />
-            <button onClick={joinRoom} className="bg-green-500 p-2 ml-2">
+            <div className="text-center text-white/40 text-xs">OR</div>
+
+            {/* JOIN ROOM */}
+            <div>
+              <label className="text-xs text-white/60">Room Code</label>
+              <input
+                value={roomId}
+                onChange={(e) => setRoomId(e.target.value)}
+                className="w-full mt-1 p-3 rounded-xl bg-white/10 border border-white/20 text-white outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Enter room ID"
+              />
+            </div>
+
+            <button
+              onClick={joinRoom}
+              className="w-full bg-gradient-to-r from-blue-500 to-cyan-500 p-3 rounded-xl font-semibold hover:scale-[1.02] transition"
+            >
               Join Room
             </button>
-          </div>
 
-          {roomId && <p>Room ID: {roomId}</p>}
+            {roomId && (
+              <div className="text-center text-white/60 text-sm mt-2">
+                Room: <span className="text-white font-mono">{roomId}</span>
+              </div>
+            )}
+          </div>
         </div>
       ) : (
-        <div>
-          <div className="flex justify-center">
+        <div className="flex gap-6 relative z-10">
+          {/* =========================
+              LEFT SIDEBAR
+          ========================== */}
+          <div className="w-[280px] flex flex-col gap-4">
+            {/* SCOREBOARD */}
+            <div className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl p-4 shadow-xl">
+              <h2 className="text-lg font-bold mb-3">🏆 Scoreboard</h2>
+
+              <div className="space-y-3">
+                {game.players.map((p, i) => {
+                  const isActive = game.turn === i;
+
+                  console.log({ isActive });
+
+                  return (
+                    <div
+                      key={p.id}
+                      className={`flex items-center justify-between p-2 rounded-xl transition ${
+                        isActive ? "bg-white/20 scale-[1.02]" : "bg-white/5"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <div
+                          className={`w-8 h-8 rounded-full flex items-center justify-center font-bold ${playerStyles[i]}`}
+                        >
+                          {p.username?.[0]?.toUpperCase()}
+                        </div>
+
+                        <div className="text-sm">
+                          <p>{p.username}</p>
+                        </div>
+                      </div>
+
+                      <div
+                        id={`score-${p.id}`}
+                        className="text-yellow-300 font-bold transition-transform"
+                      >
+                        {game.scores[p.id]}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* QUESTION PANEL */}
+            {currentQuestion && (
+              <div className="bg-gradient-to-br from-purple-600/30 via-pink-500/20 to-red-500/20 backdrop-blur-xl border border-white/20 rounded-2xl p-4 shadow-xl">
+                <h3 className="text-xs text-white/60 mb-2">
+                  🎯 Current Challenge
+                </h3>
+
+                <div className="text-white font-semibold text-sm">
+                  {currentTile?.type?.toUpperCase()}
+                </div>
+
+                <div className="mt-2 text-white text-base">
+                  {currentQuestion}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* =========================
+              BOARD AREA
+          ========================== */}
+          <div className="flex-1 flex justify-center">
             <div
               ref={boardRef}
-              className="relative grid grid-cols-5 w-[500px] h-[500px]"
+              className="
+  relative grid grid-cols-5 
+  w-[560px] h-[560px]
+  p-2 gap-[2px]
+  bg-black/40
+  border border-white/10
+  rounded-2xl
+  shadow-2xl 
+"
             >
               {BOARD_LAYOUT.map((tileIndex, i) => {
                 if (tileIndex === null) return <div key={i} />;
@@ -365,73 +481,66 @@ export default function Home() {
                   <div
                     key={i}
                     ref={(el) => (tileRefs.current[tileIndex] = el)}
-                    className={`tile hover:scale-105 transition-transform duration-200 relative flex items-center justify-center rounded-xl border border-white/10 bg-gradient-to-br ${tileColors[tile.type]} shadow-[0_8px_20px_rgba(0,0,0,0.3)]`}
+                    className={`relative flex flex-col items-center justify-center 
+  rounded-md border border-white/10 
+  ${tileColors[tile.type].bg}
+  ${tileColors[tile.type].glow}
+  overflow-hidden`}
                   >
-                    <span className="text-xs text-white/80 text-center px-1">
-                      {tile.label}
-                    </span>
+                    {/* TOP COLOR BAR */}
+                    <div
+                      className={`absolute top-0 left-0 right-0 h-2 ${tileColors[tile.type].bar}`}
+                    />
+
+                    {/* TILE CONTENT */}
+                    <div className="flex flex-col items-center justify-center px-1 text-center mt-2">
+                      <div className="text-[10px] font-bold tracking-widest text-white/90">
+                        {tile.label}
+                      </div>
+
+                      <div className="text-[9px] text-white/50 mt-1">
+                        {tile.sub}
+                      </div>
+                    </div>
+
+                    {/* subtle grid texture */}
+                    <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_1px_1px,white_1px,transparent_0)] bg-[size:10px_10px]" />
                   </div>
                 );
               })}
 
-              <div className="absolute top-0 left-0 w-full h-full pointer-events-none">
+              {/* PLAYERS */}
+              <div className="absolute inset-0 pointer-events-none">
                 {game.players.map((p, idx) => (
                   <div
                     key={p.id}
                     ref={(el) => (playerRefs.current[p.id] = el)}
-                    className={`player-float absolute w-9 h-9 rounded-full ${playerStyles[idx]} flex items-center justify-center`}
+                    className={`absolute w-8 h-8 rounded-full flex items-center justify-center ${playerStyles[idx]} player-float`}
                   >
                     {p.username?.[0]?.toUpperCase()}
                   </div>
                 ))}
               </div>
 
-              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-auto">
+              {/* DICE CENTER */}
+              <div className="absolute inset-0 flex items-center justify-center">
                 <div
-                  className={`bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/20 shadow-xl flex flex-col items-center gap-2 transition ${
-                    !isMyTurn
-                      ? "opacity-40 cursor-not-allowed"
-                      : "cursor-pointer"
-                  }`}
+                  className={`bg-black/40
+  backdrop-blur-md
+  p-5
+  rounded-2xl
+  border border-white/10
+  shadow-xl
+  hover:scale-105 transition cursor-pointer ${
+    !isMyTurn ? "opacity-40 cursor-not-allowed" : ""
+  }`}
                   onClick={rollDice}
                 >
                   <Dice value={diceValue} rolling={isRolling} />
                 </div>
-                <p className="text-xs text-white/70 pt-4">
-                  {isMyTurn ? "Your turn 🎯" : "Waiting for opponent..."}
-                </p>
               </div>
             </div>
           </div>
-
-          {/* PLAYERS */}
-          <div className="mt-6">
-            {game.players.map((p, i) => (
-              <div key={p.id}>
-                {p.username} - Pos: {game.positions[p.id]} - Score:{" "}
-                {game.scores[p.id]} {game.turn === i && "👉"}
-              </div>
-            ))}
-          </div>
-
-          {/* <Dice value={diceValue} rolling={isRolling} /> */}
-
-          {/* <button
-            onClick={rollDice}
-            disabled={!isMyTurn}
-            className="bg-purple-500 p-3 mt-4"
-          >
-            Roll Dice 🎲
-          </button> */}
-
-          {currentTile && currentTile.type !== "start" && (
-            <div className="question-card fixed top-10 left-40 -translate-x-1/2 w-[250px] p-6 rounded-2xl bg-gradient-to-br from-purple-600 via-pink-500 to-red-500 text-white">
-              <h2 className="text-xl font-bold mb-2">
-                {currentTile.type.toUpperCase()}
-              </h2>
-              <p className="text-lg">{currentQuestion}</p>
-            </div>
-          )}
         </div>
       )}
     </div>

@@ -1,20 +1,22 @@
 export const BOARD = [
-  { type: "start", label: "Start 🚀" },
-  { type: "love", label: "Love ❤️" },
-  { type: "dare", label: "Dare 🔥" },
-  { type: "memory", label: "Memory 🧠" },
-  { type: "gift", label: "Gift 🎁" },
-  { type: "love", label: "Love ❤️" },
-  { type: "dare", label: "Dare 🔥" },
-  { type: "memory", label: "Memory 🧠" },
-  { type: "gift", label: "Gift 🎁" },
-  { type: "love", label: "Love ❤️" },
-  { type: "dare", label: "Dare 🔥" },
-  { type: "memory", label: "Memory 🧠" },
-  { type: "gift", label: "Gift 🎁" },
-  { type: "love", label: "Love ❤️" },
-  { type: "dare", label: "Dare 🔥" },
-  { type: "memory", label: "Memory 🧠" },
+  { type: "start", label: "START", sub: "Go" },
+  { type: "love", label: "LOVE", sub: "Connect" },
+  { type: "dare", label: "DARE", sub: "Challenge" },
+  { type: "memory", label: "MEMORY", sub: "Recall" },
+  { type: "gift", label: "GIFT", sub: "Bonus" },
+
+  { type: "love", label: "LOVE", sub: "Connect" },
+  { type: "dare", label: "DARE", sub: "Challenge" },
+  { type: "memory", label: "MEMORY", sub: "Recall" },
+  { type: "gift", label: "GIFT", sub: "Bonus" },
+  { type: "love", label: "LOVE", sub: "Connect" },
+
+  { type: "dare", label: "DARE", sub: "Challenge" },
+  { type: "memory", label: "MEMORY", sub: "Recall" },
+  { type: "gift", label: "GIFT", sub: "Bonus" },
+  { type: "love", label: "LOVE", sub: "Connect" },
+  { type: "dare", label: "DARE", sub: "Challenge" },
+  { type: "memory", label: "MEMORY", sub: "Recall" },
 ];
 
 export const BOARD_LAYOUT = [
