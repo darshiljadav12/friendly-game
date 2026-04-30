@@ -46,6 +46,7 @@ export default function Home() {
   const [currentQuestion, setCurrentQuestion] = useState("");
   const [diceValue, setDiceValue] = useState(1);
   const [isRolling, setIsRolling] = useState(false);
+  const [isSamePosition, setIsSamePosition] = useState(false);
 
   const tileRefs = useRef({});
   const playerRefs = useRef({});
@@ -182,12 +183,26 @@ export default function Home() {
   }, [game?.scores]);
 
   useEffect(() => {
+    const areValuesSame = (obj) => {
+      if (!obj) {
+        console.log("⚠️ obj is undefined/null");
+        return false;
+      }
+
+      const values = Object.values(obj);
+
+      if (values.length === 0) return false;
+
+      return values.every((v) => v === values[0]);
+    };
+
     socket.on("roomCreated", ({ roomId }) => {
       setRoomId(roomId);
     });
 
     socket.on("gameStart", (room) => {
       setGame(room);
+      setIsSamePosition(areValuesSame(room?.positions || []));
 
       setTimeout(() => {
         setInitialPositions(room);
@@ -197,6 +212,7 @@ export default function Home() {
     socket.on("gameUpdate", ({ steps, playerId, question, tileType, room }) => {
       animateSteps(playerId, steps, () => {
         setGame(room);
+        setIsSamePosition(areValuesSame(room?.positions || []));
         setCurrentTile({ type: tileType });
         setCurrentQuestion(question);
       });
@@ -405,8 +421,6 @@ export default function Home() {
                 {game.players.map((p, i) => {
                   const isActive = game.turn === i;
 
-                  console.log({ isActive });
-
                   return (
                     <div
                       key={p.id}
@@ -515,7 +529,7 @@ export default function Home() {
                   <div
                     key={p.id}
                     ref={(el) => (playerRefs.current[p.id] = el)}
-                    className={`absolute w-8 h-8 rounded-full flex items-center justify-center ${playerStyles[idx]} player-float`}
+                    className={`absolute w-8 h-8 rounded-full flex items-center justify-center ${playerStyles[idx]} player-float ${isSamePosition && idx === 1 ? "left-10" : ""}`}
                   >
                     {p.username?.[0]?.toUpperCase()}
                   </div>
