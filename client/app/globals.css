@@ -1,29 +1,281 @@
 @import "tailwindcss";
 
+/* =========================
+   THEME (warm dark)
+========================= */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg: #1b1020;
+  --surface: #2a1a30;
+  --surface-2: #34213b;
+  --sunken: #160c1a;
+  --line: rgba(251, 207, 232, 0.12);
+  --line-strong: rgba(251, 207, 232, 0.22);
+  --text: #fdf2f8;
+  --muted: #c4a3b8;
+  --rose: #fb7185;
+  --rose-deep: #e11d48;
+  --gold: #fbbf24;
+
+  --background: var(--bg);
+  --foreground: var(--text);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-sunken: var(--sunken);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-muted: var(--muted);
+  --color-rose: var(--rose);
+  --color-gold: var(--gold);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+body {
+  color: var(--text);
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  /* layered warm gradient: wine → plum → deep violet, with rose / violet / amber glows */
+  background:
+    radial-gradient(ellipse 70% 55% at 10% 0%, rgba(225, 29, 72, 0.35), transparent 60%),
+    radial-gradient(ellipse 55% 45% at 100% 35%, rgba(168, 85, 247, 0.22), transparent 60%),
+    radial-gradient(ellipse 70% 50% at 45% 110%, rgba(251, 146, 60, 0.2), transparent 60%),
+    linear-gradient(160deg, #3d1531 0%, #2b1238 50%, #170c2b 100%);
+  background-attachment: fixed;
+}
+
+/* faint repeating heart pattern over the gradient */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='56' viewBox='0 0 56 56'%3E%3Cpath fill='%23fdf2f8' d='M28 38s-9-5.6-9-11.4A4.8 4.8 0 0 1 28 24a4.8 4.8 0 0 1 9 2.6C37 32.4 28 38 28 38z'/%3E%3C/svg%3E");
+  background-size: 56px 56px;
+}
+
+/* a few hearts slowly drifting up */
+.float-heart {
+  position: fixed;
+  bottom: -40px;
+  pointer-events: none;
+  opacity: 0;
+  animation: heart-rise linear infinite;
+}
+
+@keyframes heart-rise {
+  0% {
+    transform: translateY(0) rotate(0deg);
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.35;
+  }
+  90% {
+    opacity: 0.2;
+  }
+  100% {
+    transform: translateY(-110vh) rotate(25deg);
+    opacity: 0;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer components {
+  /* =========================
+     PANELS
+  ========================= */
+
+  .panel {
+    background: rgba(42, 26, 48, 0.82);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--line);
+    border-radius: 1.25rem;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.05),
+      0 12px 30px rgba(0, 0, 0, 0.35);
+  }
+
+  .panel-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .title-gradient {
+    background: linear-gradient(90deg, var(--rose), var(--gold));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .field {
+    background: var(--sunken);
+    border: 1px solid var(--line);
+    border-radius: 0.75rem;
+    color: var(--text);
+    outline: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .field::placeholder {
+    color: rgba(196, 163, 184, 0.5);
+  }
+
+  .field:focus {
+    border-color: var(--rose);
+    box-shadow: 0 0 0 3px rgba(251, 113, 133, 0.2);
+  }
+
+  /* =========================
+     BUTTONS (pressable)
+  ========================= */
+
+  .btn {
+    border-radius: 0.8rem;
+    font-weight: 700;
+    transition:
+      transform 0.08s ease,
+      box-shadow 0.08s ease,
+      filter 0.15s ease;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.2),
+      0 4px 0 var(--edge),
+      0 8px 14px rgba(0, 0, 0, 0.3);
+  }
+
+  .btn:hover:not(:disabled) {
+    filter: brightness(1.08);
+  }
+
+  .btn:active:not(:disabled) {
+    transform: translateY(3px);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.2),
+      0 1px 0 var(--edge),
+      0 3px 6px rgba(0, 0, 0, 0.3);
+  }
+
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .btn-primary {
+    background: linear-gradient(180deg, var(--rose), var(--rose-deep));
+    color: #fff;
+    --edge: #881337;
+  }
+
+  .btn-gold {
+    background: linear-gradient(180deg, #fcd34d, #f59e0b);
+    color: #451a03;
+    --edge: #92400e;
+  }
+
+  .btn-secondary {
+    background: var(--surface-2);
+    border: 1px solid var(--line-strong);
+    color: var(--text);
+    --edge: var(--sunken);
+  }
 }
+
+/* =========================
+   BOARD
+========================= */
+
+.board-frame {
+  background: var(--sunken);
+  border: 1px solid var(--line);
+  box-shadow:
+    inset 0 2px 12px rgba(0, 0, 0, 0.6),
+    0 0 0 8px var(--surface),
+    0 0 0 9px var(--line),
+    0 24px 50px rgba(0, 0, 0, 0.5);
+}
+
+/* active player's token on the board */
+@keyframes token-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.2);
+  }
+}
+
+.token-active {
+  animation: token-pulse 1.4s ease-in-out infinite;
+}
+
+/* dice tray glows in the active player's colour when it can be rolled */
+@keyframes dice-ready {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 0 var(--glow),
+      0 6px 0 var(--sunken);
+  }
+  50% {
+    box-shadow:
+      0 0 28px 2px var(--glow),
+      0 6px 0 var(--sunken);
+  }
+}
+
+.dice-ready {
+  animation: dice-ready 1.6s ease-in-out infinite;
+}
+
+/* emoji reactions rising from the bottom of the screen */
+.reaction-float {
+  position: absolute;
+  bottom: -60px;
+  animation: reaction-rise 2.2s ease-out forwards;
+}
+
+@keyframes reaction-rise {
+  0% {
+    transform: translateY(0) scale(0.6);
+    opacity: 0;
+  }
+  15% {
+    transform: translateY(-15vh) scale(1.15);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-75vh) scale(1) rotate(-12deg);
+    opacity: 0;
+  }
+}
+
+/* announcement toast (lap bonus, wild tile, cards…) */
+.toast-in {
+  animation: toast-in 0.35s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+
+@keyframes toast-in {
+  from {
+    transform: translateY(-20px) scale(0.9);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+/* =========================
+   DICE
+========================= */
 
 .perspective {
   perspective: 600px;
@@ -34,9 +286,9 @@ body {
 }
 
 .dot {
-  width: 10px;
-  height: 10px;
-  background: black;
+  width: 12px;
+  height: 12px;
+  background: radial-gradient(circle at 35% 35%, #5b3a55, #1b1020 70%);
   border-radius: 50%;
   position: absolute;
 }
@@ -49,33 +301,33 @@ body {
 }
 
 .dot-top-left {
-  top: 20%;
-  left: 20%;
+  top: 18%;
+  left: 18%;
 }
 
 .dot-top-right {
-  top: 20%;
-  right: 20%;
+  top: 18%;
+  right: 18%;
 }
 
 .dot-bottom-left {
-  bottom: 20%;
-  left: 20%;
+  bottom: 18%;
+  left: 18%;
 }
 
 .dot-bottom-right {
-  bottom: 20%;
-  right: 20%;
+  bottom: 18%;
+  right: 18%;
 }
 
 .dot-middle-left {
   top: 50%;
-  left: 20%;
+  left: 18%;
   transform: translateY(-50%);
 }
 
 .dot-middle-right {
   top: 50%;
-  right: 20%;
+  right: 18%;
   transform: translateY(-50%);
 }
