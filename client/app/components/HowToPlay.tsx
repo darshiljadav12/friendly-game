@@ -2,17 +2,16 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { POWER_UP_INFO, TILE_THEMES, tileStyle } from "../constants";
+import { BOARD_PRESETS, POWER_UP_INFO, THEMES, TILE_THEMES, tileStyle } from "../constants";
+import type { PowerUp } from "../types";
 
-// NOTE: keep these rules in sync with server/index.js (points, timings and limits live there)
+// NOTE: keep these rules in sync with server/config.js, server/game.js,
+// server/couples.js and server/achievements.js (points, prices and limits live there)
 
 type Section = { id: string; title: string; icon: string; body: ReactNode };
 
 const Tile = ({ type }: { type: keyof typeof TILE_THEMES }) => (
-  <span
-    className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-sm align-middle"
-    style={tileStyle(type)}
-  >
+  <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-sm align-middle" style={tileStyle(type)}>
     {TILE_THEMES[type].icon}
   </span>
 );
@@ -40,6 +39,42 @@ function TileRow({ type, name, points, children }: { type: keyof typeof TILE_THE
   );
 }
 
+const CARD_RULES: Record<PowerUp, ReactNode> = {
+  freePass: (
+    <>
+      Skip the challenge and still get its <b>base</b> points: Love/Memory 10, Dare 20, Gift 15, Timed 15, Guess 15 (only you, not your partner).
+      Counts as done.
+    </>
+  ),
+  reroll: <>Throw away this challenge and roll again from where you are. The new roll doesn&apos;t use up a turn, and a bonus roll you already had from a 6 is kept too.</>,
+  handOff: (
+    <>
+      Your partner has to do this challenge and gets any points. On Love/Memory you&apos;re the one who rates. If it&apos;s a dare they can save it to{" "}
+      <b>their</b> list. Not on Guess. If your partner holds a 🛡️ Shield, it blocks this: both cards are used up and you still have to do it.
+    </>
+  ),
+  shield: (
+    <>
+      Works <b>by itself</b>, you never play it. When your partner&apos;s ⚡ Wild would <b>swap</b> with you or <b>steal</b> from you, or they play 😈 Pass It On on
+      you, your Shield blocks it and is used up. It doesn&apos;t block Mirror, Back 3 or Double (those only affect the roller). Your partner sees a hint on the
+      challenge card when you hold one.
+    </>
+  ),
+  mirror: (
+    <>
+      Your partner earns the same points as you on this challenge (plus coins), even though you do it. Works on Love/Memory (they get the same hearts × 5),
+      Dare, Gift and Timed. Not on Guess. If you skip or save the challenge, nobody gets anything.
+    </>
+  ),
+  teleport: (
+    <>
+      Use it from <b>Your cards</b> on your turn <b>instead of rolling</b> (no open challenge). Tap Use, then tap any tile except your own. You jump there and
+      that tile happens as usual (a challenge, Wild, or a Together challenge if your partner is there). It uses up your turn, or your pending bonus roll if you
+      have one. Jumping over START gives no bonus. It also closes your shop.
+    </>
+  ),
+};
+
 const SECTIONS: Section[] = [
   {
     id: "basics",
@@ -47,32 +82,45 @@ const SECTIONS: Section[] = [
     icon: "🎲",
     body: (
       <>
-        <H>Getting started</H>
+        <H>Two ways to play</H>
         <List>
-          <li>The game is for exactly <b>2 players</b>. Enter your name (up to 20 characters) to begin.</li>
           <li>
-            One player taps <b>Create new room</b> and chooses the <b>mode</b> (Competitive or Co-op) and the{" "}
-            <b>length</b> (5, 10 or 20 rounds, or First to 150). These can&apos;t be changed after the room is created.
+            <b>💑 Couple</b>: log in to your own account, linked to your partner&apos;s (see <b>Couple</b>). Games are private to the two of you and everything is saved: history, memory book,
+            stats, badges and owed dares.
           </li>
-          <li>The other player enters the 5-letter <b>room code</b> and taps Join. Capital or small letters both work.</li>
-          <li>The game starts as soon as the second player joins. A room can&apos;t take a third player.</li>
-          <li>The <b>room creator always goes first</b>, then players take turns.</li>
+          <li>
+            <b>⚡ Quick game</b>: play with anyone using just a name (up to 20 characters). Nothing is saved after the game ends.
+          </li>
+          <li>The game is always for exactly <b>2 players</b>.</li>
+        </List>
+
+        <H>Starting a game</H>
+        <List>
+          <li>
+            The creator picks the <b>mode</b>, <b>length</b>, <b>board</b>, <b>theme</b> and <b>accessibility</b> (see <b>Settings</b>). Mode, length and board are fixed once
+            the room exists; the creator can still change the theme and accessibility with 🎨 during the game.
+          </li>
+          <li>
+            Then share the <b>invite</b>: the 5-letter code, a link (<span className="font-mono">/join/CODE</span>) or the QR code. The link opens the game with the code
+            filled in. If you&apos;re logged in to the couple, it joins straight away.
+          </li>
+          <li>The game starts the moment the second player joins. The <b>creator always goes first</b>.</li>
         </List>
 
         <H>Your turn</H>
         <List>
-          <li>When it&apos;s your turn, the dice glows in your colour. Tap it to roll a number from 1 to 6.</li>
-          <li>Your token hops that many tiles <b>clockwise</b> around the 28-tile board.</li>
+          <li>The dice glows in your colour on your turn. Tap it to roll 1–6 and hop <b>clockwise</b> around the 28-tile board.</li>
           <li>Whatever you land on happens (see <b>Tiles</b>). When it&apos;s finished, the turn passes to your partner.</li>
-          <li>You can&apos;t roll again while a challenge is still open. It has to be finished, skipped or saved first.</li>
-          <li>Each normal roll uses one of your turns. <b>Bonus rolls and Reroll cards don&apos;t</b>.</li>
+          <li>You can&apos;t roll again while a challenge is still open. Finish, skip or save it first.</li>
+          <li>Each normal roll or Teleport uses one of your turns. <b>Bonus rolls and Rerolls don&apos;t</b>.</li>
+          <li>The <b>round</b> shown is the lowest number of turns either of you has taken, plus one.</li>
           <li>
-            The <b>round</b> number shown is the lowest number of turns either player has taken, plus one. Round 3 means
-            both of you have finished 2 turns.
+            The <b>📜 Activity</b> panel lists everything that has happened this game, newest first. Things that happened <b>since your last turn</b> are highlighted,
+            so you can catch up before you roll.
           </li>
         </List>
 
-        <H>Points at a glance</H>
+        <H>Points & coins at a glance</H>
         <div className="grid grid-cols-2 gap-1.5 text-xs">
           {[
             ["❤️ Love / 📸 Memory", "5–15 (partner rates)"],
@@ -81,8 +129,9 @@ const SECTIONS: Section[] = [
             ["🤔 Guess", "15 each on a match"],
             ["⏱️ Timed", "30 in time, 15 late"],
             ["💑 Together", "10 each"],
-            ["⭐ Passing START", "+5"],
-            ["Skip", "0"],
+            ["⭐ Passing START", "+5 pts, +3 🪙"],
+            ["Any challenge that scores", "+1 🪙"],
+            ["Skip / save", "0"],
           ].map(([k, v]) => (
             <div key={k} className="flex flex-col rounded-lg bg-sunken px-2.5 py-1.5">
               <span className="font-semibold">{k}</span>
@@ -90,7 +139,7 @@ const SECTIONS: Section[] = [
             </div>
           ))}
         </div>
-        <Note>Skipping never costs you points. You just don&apos;t earn any for that challenge.</Note>
+        <Note>Skipping never costs points. Coins are only for the shop: spending them never lowers your score.</Note>
       </>
     ),
   },
@@ -101,55 +150,38 @@ const SECTIONS: Section[] = [
     body: (
       <div className="space-y-2.5">
         <TileRow type="love" name="Love" points="5 / 10 / 15">
-          <li>Answer the question out loud (or on a call), then tap <b>Done</b>.</li>
-          <li>Your partner rates your answer: ❤️ = 5, ❤️❤️ = 10, ❤️❤️❤️ = 15 points.</li>
-          <li>The game waits until your partner rates. Their phone buzzes when it&apos;s time.</li>
-          <li><b>Skip</b> gives 0 and skips the rating.</li>
+          <li>Answer out loud (or on a call), then tap <b>Done</b>. Your partner rates it: ❤️ = 5, ❤️❤️ = 10, ❤️❤️❤️ = 15.</li>
+          <li>The game waits for the rating; their phone buzzes. <b>Skip</b> gives 0.</li>
+          <li>In couple games you can type an optional note (up to 200 characters) before Done; it goes to your memory book.</li>
         </TileRow>
         <TileRow type="memory" name="Memory" points="5 / 10 / 15">
-          <li>Works exactly like Love: share the memory, tap Done, and your partner rates it with 1–3 hearts.</li>
+          <li>Exactly like Love: share the memory, tap Done, your partner rates it with 1–3 hearts.</li>
         </TileRow>
         <TileRow type="dare" name="Dare" points="20">
-          <li><b>Done</b> = 20 points. <b>Skip</b> = 0.</li>
-          <li>
-            <b>⏳ Save for later</b>: put the dare off. You get no points now and the turn passes. See <b>Dares</b> for
-            how to finish it later.
-          </li>
+          <li><b>Done</b> = 20. <b>Skip</b> = 0. <b>⏳ Save for later</b> = no points now, finish it later (see <b>Dares</b>).</li>
         </TileRow>
         <TileRow type="gift" name="Gift" points="15">
-          <li>Do the sweet gesture, then tap <b>Done</b> for 15 points, or <b>Skip</b>.</li>
+          <li>Do the sweet gesture, then <b>Done</b> for 15, or <b>Skip</b>.</li>
         </TileRow>
         <TileRow type="guess" name="Guess" points="15 each">
-          <li>The question is about <b>you</b>, the player who landed (&quot;What&apos;s my favourite food?&quot;).</li>
-          <li>You type your real answer and your partner types a guess. Answers can be up to 80 characters.</li>
-          <li>Neither can see the other&apos;s text until <b>both are locked in</b>. Then both are revealed side by side.</li>
-          <li>
-            <b>You</b> decide: <b>It&apos;s a match!</b> gives <b>both</b> of you 15 points, <b>Not quite</b> gives 0.
-            Close enough counts if you say so.
-          </li>
-          <li>You can skip the question before you lock in your answer.</li>
+          <li>The question is about <b>you</b>, the player who landed. You type your real answer and your partner types a guess (80 characters max).</li>
+          <li>Neither text is shown until <b>both are locked in</b>. Then <b>you</b> decide: <b>It&apos;s a match!</b> gives both of you 15, <b>Not quite</b> gives 0.</li>
+          <li>You can skip before locking in your answer.</li>
         </TileRow>
         <TileRow type="timed" name="Timed" points="30 / 15">
-          <li>Tap <b>▶ Start 30s timer</b> when you&apos;re ready. The countdown shows on both screens.</li>
-          <li>Tap <b>Done</b> within 30 seconds for <b>30 points</b> (double). There&apos;s a 1-second allowance for lag.</li>
-          <li>Finished but too slow? Tap Done anyway and you still get <b>15</b>.</li>
-          <li>Skip gives 0. Timed challenges <b>can&apos;t</b> be saved for later.</li>
+          <li>Tap <b>▶ Start 30s timer</b>; it counts down on both screens. Done within 30 s (1 s grace for lag) = <b>30</b>; later = <b>15</b>.</li>
+          <li>Skip gives 0. Timed challenges can&apos;t be saved for later.</li>
         </TileRow>
         <TileRow type="wild" name="Wild" points="random">
-          <li>Something random happens straight away, with no challenge to do. It&apos;s one of these four:</li>
-          <li><b>Swap</b>: you and your partner swap places. Neither of you gets the challenge of your new tile.</li>
-          <li>
-            <b>Steal</b>: take up to 10 points from your partner. You can&apos;t take more than they have, and their score
-            never goes below 0. <b>In co-op</b> this is a +10 bonus instead.
-          </li>
-          <li><b>Back 3</b>: move back 3 tiles. The tile you land on does nothing, and going back past START gives no bonus.</li>
-          <li>
-            <b>Double</b>: your next challenge points are doubled (shown as a <b>2×</b> badge). If you already have
-            Double waiting, another one doesn&apos;t stack.
-          </li>
+          <li>One random effect straight away, no challenge to do:</li>
+          <li><b>Swap</b> places with your partner (neither gets the new tile&apos;s challenge).</li>
+          <li><b>Steal</b> up to 10 points (never below 0). In <b>co-op</b> it&apos;s a +10 bonus instead.</li>
+          <li><b>Back 3</b> tiles (the tile does nothing; going back past START gives nothing).</li>
+          <li><b>Double</b>: your next challenge points are doubled (2× badge). Doesn&apos;t stack.</li>
+          <li>Your partner&apos;s 🛡️ Shield blocks a swap or a steal (and is used up).</li>
         </TileRow>
-        <TileRow type="start" name="Start" points="+5">
-          <li>Passing over <b>or</b> landing on START gives +5 points and a power-up card (see <b>Cards</b>).</li>
+        <TileRow type="start" name="Start" points="+5 & 🪙3">
+          <li>Passing over <b>or</b> landing on START: +5 points, +3 coins and the <b>🛒 shop opens</b>. No free cards: cards are only sold in the shop.</li>
           <li>Landing on START has no challenge, so your turn ends (unless you rolled a 6).</li>
         </TileRow>
       </div>
@@ -163,90 +195,70 @@ const SECTIONS: Section[] = [
       <>
         <H>🎲 Rolling a 6</H>
         <List>
-          <li>You get a <b>bonus roll</b>. First finish whatever is on the tile you landed on, then roll again.</li>
-          <li>A bonus roll doesn&apos;t use up a turn, so it doesn&apos;t count against your rounds.</li>
-          <li>Roll another 6 on the bonus roll and you get yet another bonus roll.</li>
+          <li>Bonus roll: finish the tile you landed on, then roll again. It doesn&apos;t use up a turn. Another 6 gives another one.</li>
           <li>The dice label shows <b>&quot;🎲 Bonus roll&quot;</b> while you have one waiting.</li>
         </List>
 
         <H>💑 Together challenge</H>
         <List>
-          <li>If you land on the tile your partner is standing on, you <b>both</b> get a Together challenge instead of the tile&apos;s normal one.</li>
-          <li>This happens on any tile, including Wild and START (where you still get the +5 and the card).</li>
-          <li>Both players tap <b>We did it</b>. Once both have tapped, <b>each</b> gets 10 points.</li>
-          <li>Either player can tap <b>Skip</b>, which ends it for both with no points.</li>
-          <li>
-            Being moved onto your partner (by Swap or Back 3) <b>doesn&apos;t</b> start a Together challenge. Only landing
-            there with a roll does.
-          </li>
-          <li>Power-up cards can&apos;t be used on a Together challenge.</li>
+          <li>Landing (by roll or Teleport) on your partner&apos;s tile gives you <b>both</b> a Together challenge instead of the tile, on any tile type.</li>
+          <li>Both tap <b>We did it</b> and each gets 10 (+1 coin each). Either can <b>Skip</b> it for both.</li>
+          <li>Being moved onto your partner by a Wild Swap or Back 3 doesn&apos;t count. Cards can&apos;t be played on it.</li>
         </List>
 
         <H>✖️2 Double points</H>
         <List>
-          <li>From a Wild tile. It doubles the <b>next challenge points you earn</b>, then it&apos;s used up.</li>
-          <li>It doubles: Done, partner ratings, Timed (60 if in time), Guess matches, Together, and Free Pass.</li>
-          <li>It does <b>not</b> double the START bonus, Wild steals or bonuses, or saved dares completed later.</li>
-          <li>If a challenge gives points to both players, each player&apos;s own Double applies only to their share.</li>
+          <li>From a Wild tile. Doubles the next challenge points <b>you</b> earn: Done, ratings, Timed, Guess matches, Together, Free Pass and Mirror payouts.</li>
+          <li>Not doubled: the START bonus, Wild steals or bonuses, saved dares or gifts finished later.</li>
         </List>
 
-        <H>😂 Reactions</H>
+        <H>😂 Reactions & 🔊 sound</H>
         <List>
-          <li>Tap the emoji bar under the board any time to send a reaction that floats up on both screens.</li>
-          <li>There&apos;s a short cooldown (a quarter of a second), so really fast taps are ignored.</li>
-        </List>
-
-        <H>🔊 Sound & vibration</H>
-        <List>
-          <li>Dice, steps, points, &quot;your turn&quot;, the timer and winning all have sounds. The 🔊 button in the header mutes them.</li>
-          <li>Your mute choice is remembered on this device.</li>
-          <li>Phones vibrate on your turn and when your partner needs your rating. iPhones don&apos;t support vibration from websites.</li>
-          <li>Browsers only allow sound after you tap the page once.</li>
+          <li>Tap the emoji bar under the board any time to send a reaction to both screens (a quarter-second cooldown).</li>
+          <li>Sounds for dice, steps, points, your turn, the timer and winning. 🔊 in the header mutes them (remembered on this device).</li>
+          <li>Phones vibrate on your turn and when your rating is needed (not on iPhone). Browsers only play sound after your first tap.</li>
         </List>
       </>
     ),
   },
   {
     id: "cards",
-    title: "Cards",
+    title: "Cards & shop",
     icon: "🃏",
     body: (
       <>
-        <H>Earning cards</H>
+        <H>Getting cards</H>
         <List>
-          <li>Each time you pass or land on <b>START</b>, you get one random power-up card.</li>
-          <li>You can hold up to <b>3 cards</b>. With 3 already, you still get the +5 but no new card.</li>
-          <li>Your cards are shown in <b>Your cards</b>. Your partner can see how many you have (🃏) but not which ones.</li>
-          <li>Cards are cleared when you press Play again.</li>
+          <li>Cards are <b>only sold in the shop</b>; nobody gets free cards. You can hold at most <b>3</b>. They&apos;re meant to be a rare treat.</li>
+          <li>Your partner sees how many cards you have (🃏) but not which ones. Cards and coins reset on Play again.</li>
+        </List>
+
+        <H>🛒 The shop</H>
+        <List>
+          <li>It opens for you when you pass or land on START and stays open, even during your partner&apos;s turn, until your <b>next roll</b> (including a bonus roll) or a Teleport. Each player has their own shop.</li>
+          <li>While it&apos;s open you can buy as many cards as your coins and the 3-card limit allow.</li>
+          <li>
+            Prices:{" "}
+            {(Object.keys(POWER_UP_INFO) as PowerUp[]).map((c, i) => (
+              <span key={c}>
+                {i > 0 && " · "}
+                {POWER_UP_INFO[c].icon} {POWER_UP_INFO[c].name} {POWER_UP_INFO[c].price}🪙
+              </span>
+            ))}
+          </li>
+          <li>Coins: +1 for every challenge that gives you points (also Mirror payouts and saved dares/gifts), +3 for each START. Skips, saves and Wild bonuses give none.</li>
         </List>
 
         <H>The cards</H>
         <div className="space-y-2">
-          {(Object.keys(POWER_UP_INFO) as (keyof typeof POWER_UP_INFO)[]).map((key) => (
+          {(Object.keys(POWER_UP_INFO) as PowerUp[]).map((key) => (
             <div key={key} className="flex gap-2.5 rounded-xl bg-sunken p-3">
               <span className="text-xl">{POWER_UP_INFO[key].icon}</span>
               <div className="text-[13px] leading-relaxed">
-                <p className="font-bold">{POWER_UP_INFO[key].name}</p>
-                {key === "freePass" && (
-                  <p className="text-white/80">
-                    Skip the challenge and still get its <b>base</b> points: Love/Memory 10, Dare 20, Gift 15, Timed 15,
-                    Guess 15 (only you, not your partner).
-                  </p>
-                )}
-                {key === "reroll" && (
-                  <p className="text-white/80">
-                    Throw away this challenge and roll again from where you are. The new roll doesn&apos;t use up a
-                    turn, and if you already had a bonus roll from a 6, you keep that too.
-                  </p>
-                )}
-                {key === "handOff" && (
-                  <p className="text-white/80">
-                    Your partner has to do this challenge instead, and any points go to <b>them</b>. On Love/Memory,
-                    you&apos;re the one who rates. If it&apos;s a dare, they can save it to <b>their</b> list. It
-                    doesn&apos;t work on Guess questions, because those are about you. Your partner can&apos;t play a
-                    card on a challenge you passed to them.
-                  </p>
-                )}
+                <p className="font-bold">
+                  {POWER_UP_INFO[key].name} <span className="font-normal text-muted">· {POWER_UP_INFO[key].price}🪙</span>
+                </p>
+                <p className="text-white/80">{CARD_RULES[key]}</p>
               </div>
             </div>
           ))}
@@ -254,75 +266,158 @@ const SECTIONS: Section[] = [
 
         <H>When you can play a card</H>
         <List>
-          <li>Only on <b>your own</b> challenge, the one you landed on, and only <b>before</b> you&apos;ve done anything with it.</li>
-          <li>Cards appear at the bottom of the challenge card under <b>Play a card</b>.</li>
-          <li>
-            You <b>can&apos;t</b> play a card: on a Together challenge, after starting a Timed timer, while waiting for a
-            rating, or on a Guess once either of you has typed an answer.
-          </li>
-          <li>You can play one card per challenge (after a Reroll, the challenge is gone; after Pass It On, it&apos;s no longer yours).</li>
+          <li>Free Pass, Reroll, Pass It On and Mirror: only on <b>your own</b> challenge (the one you landed on), before you&apos;ve done anything with it, from <b>Play a card</b> on the challenge card.</li>
+          <li><b>One card per challenge.</b> Not on Together, not after starting a timer, not while waiting for a rating, not on a Guess once either answer is typed.</li>
+          <li>Teleport replaces a roll; Shield is automatic.</li>
         </List>
       </>
     ),
   },
   {
     id: "dares",
-    title: "Saved dares",
+    title: "Saved & IOU",
     icon: "⏳",
     body: (
       <>
+        <H>Saving a dare or gift</H>
         <List>
-          <li><b>Save for later</b> only appears on normal <b>Dare</b> tiles, not on Timed or any other challenge.</li>
-          <li>Saving ends your turn with no points. The dare goes into the <b>Saved dares</b> list, which both of you can see, marked in its owner&apos;s colour.</li>
-          <li>
-            Once you&apos;ve done it in real life, tap <b>Done</b> on it in the list. You can do this <b>at any time</b>
-            during the game, even when it&apos;s not your turn. You get its 20 points.
-          </li>
-          <li>Only the player who saved the dare can mark it done.</li>
-          <li>Saved dares are <b>never doubled</b>, even if you have a 2× waiting (your 2× stays for your next challenge).</li>
-          <li>In <b>First to 150</b>, finishing a saved dare can win you the game on the spot.</li>
-          <li>When the game ends, any dares not done are listed on the results screen as <b>&quot;Dares still owed&quot;</b>. They can&apos;t earn points any more.</li>
-          <li>Pressing <b>Play again</b> clears the list.</li>
+          <li><b>Save for later</b> is on <b>Dare</b> and <b>Gift</b> tiles (you can&apos;t always give a gift mid-game). It ends your turn with no points and adds it to <b>Saved for later</b>.</li>
+          <li>Done it? Tap <b>Done</b> on it any time during the game, even on your partner&apos;s turn: you get its points (dare 20, gift 15) and 1 coin, never doubled.</li>
+          <li>Only the person who saved it can mark it done. In <b>First to 150</b>, finishing one can win the game on the spot.</li>
         </List>
-        <Note>Saving is great for dares you can&apos;t do right now, like ones that need you to be together in person.</Note>
+
+        <H>💌 IOU wallet (couple games)</H>
+        <List>
+          <li>Saved dares and gifts not done by the end of a couple game move into your <b>IOU wallet</b>, which lasts across games (the latest 50 are kept).</li>
+          <li>Find it in the couple home (<b>💌 IOU</b> tab) and during couple games (&quot;IOU wallet (earlier games)&quot;).</li>
+          <li>When you&apos;ve done one for real, the owner taps <b>Done</b>. No points, but it counts toward the 💌 Promise Keeper badge and shows in the activity feed.</li>
+          <li>In a quick game, unfinished dares are just listed as &quot;still owed&quot; at the end.</li>
+        </List>
       </>
     ),
   },
   {
-    id: "winning",
-    title: "Winning",
-    icon: "🏆",
+    id: "couple",
+    title: "Couple",
+    icon: "💑",
     body: (
       <>
-        <H>🏆 Competitive</H>
+        <H>Your couple profile</H>
         <List>
           <li>
-            <b>5 / 10 / 20 rounds</b>: the game ends once <b>both</b> players have used all their turns. If the last roll
-            was a 6, the bonus roll happens first, and any open challenge is finished first.
+            Each of you <b>signs up</b> with your own name (shown in games), a <b>username</b> (3–20 letters, numbers, dots or underscores) and a <b>password</b> (6+
+            characters). No email needed.
           </li>
           <li>
-            <b>First to 150</b>: there&apos;s no round limit. The game ends the moment someone has <b>150 or more</b> when
-            a turn ends, or when they finish a saved dare.
+            One of you taps <b>Create our couple</b> and gets a code like <span className="font-mono">LOVE-7K2Q</span>. The other taps <b>Join your partner</b> and enters it.
+            A couple is exactly two accounts, and an account belongs to one couple.
           </li>
-          <li>The highest score wins. Equal scores are a <b>tie</b>.</li>
+          <li>After that, just <b>log in</b> with your username and password on any device; it remembers you until you tap <b>Log out</b> (up to 20 devices per account).</li>
+          <li><b>5 wrong passwords lock</b> the account for 10 minutes. Couple games can start once both of you have joined.</li>
+          <li>Couple games use your profile names and keep each person&apos;s colour across games.</li>
         </List>
 
-        <H>💞 Co-op</H>
+        <H>Private couple games</H>
         <List>
-          <li>You play as a team. Every point either of you earns fills the shared <b>💞 Love meter</b>.</li>
-          <li>The goal is <b>30 points per round</b>: 150 for 5 rounds, 300 for 10 and 600 for 20.</li>
-          <li>Reach the goal by the end of the last round and you <b>win together</b>. Otherwise it&apos;s &quot;So close!&quot;</li>
-          <li>Co-op always uses rounds. &quot;First to 150&quot; isn&apos;t available in co-op.</li>
-          <li>In co-op, the Wild <b>Steal</b> becomes a +10 bonus. Everything else works the same.</li>
+          <li>Only the other half of your couple can join (logged in as the other person). One person can&apos;t take both seats.</li>
+          <li>While a game is waiting, your partner sees a <b>💌 Join your game</b> button in their couple home, or can open the invite link.</li>
         </List>
 
-        <H>After the game</H>
+        <H>Saved when a couple game ends</H>
         <List>
-          <li>The results screen shows both scores and any dares still owed.</li>
+          <li><b>📜 History</b>: date, settings, scores, each player&apos;s numbers and the full activity log of what happened.</li>
           <li>
-            <b>Play again</b> (either player can press it) starts a new game in the same room with the same settings.
-            Scores, positions, cards, Double bonuses and saved dares all reset. The room creator goes first again.
+            <b>📖 Memory book</b>: rated Love/Memory answers (with hearts and your note), every Guess round (both answers, match or not), dares, gifts and timed
+            challenges you did, saved dares and gifts you finished, and Together moments. Skipped ones aren&apos;t kept. ⭐ Star your favourites and filter by type.
           </li>
+          <li><b>📊 Stats</b> per person: wins, points, best score, done vs skipped, average hearts, guess accuracy, timers beaten, cards, coins, sixes, laps and favourite tile.</li>
+          <li><b>🏅 Badges</b> (below) and leftover dares to the <b>💌 IOU wallet</b>.</li>
+          <li>A game is saved once it finishes. Leaving before the end saves nothing.</li>
+        </List>
+
+        <H>🏅 Badges</H>
+        <div className="grid grid-cols-1 gap-1 text-[12px] sm:grid-cols-2">
+          {[
+            ["🏆 First Victory", "Win a competitive game"],
+            ["💞 Dream Team", "Fill the love meter in co-op"],
+            ["💯 Century", "Score 100+ in one game"],
+            ["😍 Heart Throb", "3 hearts, three times in a game"],
+            ["🔮 Mind Reader", "3 guess matches in a game"],
+            ["💪 No Excuses", "No skips (at least 3 done)"],
+            ["😈 Dare Devil", "4 dares in a game"],
+            ["⚡ Speed Demon", "Beat the timer twice in a game"],
+            ["🃏 Card Shark", "Play 2 cards in a game"],
+            ["🎲 Lucky Sixes", "Roll three 6s in a game"],
+            ["🌍 Globetrotter", "Pass START 3 times in a game"],
+            ["🛍️ Big Spender", "Spend 20 coins in a game"],
+            ["📅 Regulars", "Play 10 games together"],
+            ["📅 Promise Keeper", "Complete 5 IOU dares or gifts"],
+            ["📅 Soulmates", "20 guess matches in total"],
+            ["📅 Storyteller", "10 memory-book notes"],
+          ].map(([name, desc]) => (
+            <div key={name} className="rounded-lg bg-sunken px-2.5 py-1.5">
+              <span className="font-semibold">{name}</span> <span className="text-muted">· {desc}</span>
+            </div>
+          ))}
+        </div>
+        <Note>Badges are checked when a game ends. In quick games you see the ones you earned on the results screen, but they aren&apos;t kept. 📅 badges count across all your couple games.</Note>
+      </>
+    ),
+  },
+  {
+    id: "settings",
+    title: "Settings",
+    icon: "🎛️",
+    body: (
+      <>
+        <H>Mode & length</H>
+        <List>
+          <li><b>🏆 Competitive</b>: highest score wins; equal scores are a tie.</li>
+          <li><b>💞 Co-op</b>: every point fills a shared love meter; reach <b>30 × rounds</b> (150 / 300 / 600) by the end to win together. Co-op always uses rounds.</li>
+          <li><b>5 / 10 / 20 rounds</b> end when both players used all their turns (a pending bonus roll and an open challenge finish first). <b>First to 150</b> ends the moment someone has 150+ at the end of a turn or after finishing a saved dare or gift.</li>
+        </List>
+
+        <H>Board</H>
+        <List>
+          {BOARD_PRESETS.map((b) => (
+            <li key={b.value}>
+              <b>
+                {b.icon} {b.label}
+              </b>
+              : {b.desc}
+              {b.value === "custom" ? " (0–5 for each tile type; all zero falls back to Classic)." : "."}
+            </li>
+          ))}
+          <li>Always START + 27 tiles. Every board except Classic is reshuffled for each new game, including Play again. &quot;Tiles on this board&quot; lists what&apos;s in play.</li>
+        </List>
+
+        <H>Theme</H>
+        <List>
+          <li>{THEMES.map((t) => t.label).join(", ")}. Changes the background and accent colours for both players; tile colours stay the same.</li>
+          <li>Only the <b>room creator</b> sees the 🎨 button in the game header and can change the theme (and the room&apos;s accessibility) at any time; both screens update. If the creator leaves for good, the other player takes over.</li>
+        </List>
+
+        <H>♿ Accessibility</H>
+        <List>
+          <li>The creator can turn on <b>Reduce motion</b>, <b>Larger text</b>, <b>High contrast</b> and <b>Colour-blind friendly</b> for the room.</li>
+          <li>Each player can change any of them <b>just for themselves</b> with the ♿ button in the game header (remembered on that device; &quot;reset&quot; goes back to the room&apos;s setting).</li>
+          <li>Reduce motion also turns on automatically if your device asks for less motion. It hides the floating hearts and emoji reactions (their sound still plays).</li>
+          <li>Colour-blind mode uses blue and orange players, and the second player&apos;s token is a rounded square instead of a circle.</li>
+          <li>Everything works with a keyboard (visible focus ring), and the board and scores have screen-reader labels.</li>
+        </List>
+      </>
+    ),
+  },
+  {
+    id: "end",
+    title: "Game over",
+    icon: "🏁",
+    body: (
+      <>
+        <List>
+          <li>The results screen shows the scores, the love meter in co-op, the badges each player earned (<b>NEW</b> = first time ever, couple games only) and any dares still owed.</li>
+          <li><b>📸 Share result card</b> makes an image with the date, scores, best moment and badges. It opens your phone&apos;s share sheet, or downloads the picture on a computer.</li>
+          <li><b>Play again</b> (either player) starts a new game in the same room with the same settings. Scores, positions, coins, cards, 2× and saved dares/gifts reset; the creator goes first.</li>
           <li><b>Back to lobby</b> leaves the room.</li>
         </List>
       </>
@@ -330,42 +425,34 @@ const SECTIONS: Section[] = [
   },
   {
     id: "connection",
-    title: "Connection",
+    title: "Connection & app",
     icon: "📶",
     body: (
       <>
         <H>Refreshing & dropping out</H>
         <List>
-          <li>Refreshing the page puts you <b>straight back</b> in your seat with the same position, score and cards.</li>
-          <li>
-            Your seat is tied to <b>this browser tab</b>. A new tab or another browser counts as a new player. That&apos;s
-            also how you can test with 2 tabs on one computer.
-          </li>
-          <li>
-            If you lose connection, your partner sees you as <b>offline</b> and the game pauses on you. Come back within{" "}
-            <b>60 seconds</b> and you carry on as if nothing happened.
-          </li>
-          <li>
-            After 60 seconds you&apos;re removed. Your partner goes back to the waiting screen and the game{" "}
-            <b>resets</b>. Someone can join again with the same room code.
-          </li>
-          <li>The game also pauses if it&apos;s your partner&apos;s move (rolling, rating, guessing…) while they&apos;re offline.</li>
+          <li>Refreshing puts you straight back in your seat. Your seat is tied to <b>this browser tab</b> (a new tab is a new player), while your couple login is remembered for the whole device.</li>
+          <li>If you lose connection, your partner sees you <b>offline</b> and the game waits. Come back within <b>60 seconds</b> and carry on.</li>
+          <li>After 60 seconds you&apos;re removed, your partner goes back to the waiting screen and the game resets (a couple game left this way isn&apos;t saved).</li>
+          <li>Games survive a server restart: open the page again within 60 seconds of it coming back.</li>
+          <li><b>Leave</b> removes you right away. When both have left, the room is deleted and its code stops working. Idle rooms are deleted after a day.</li>
         </List>
 
-        <H>Leaving</H>
+        <H>📲 Install it like an app</H>
         <List>
-          <li><b>Leave</b> in the header removes you right away, and your partner goes back to the waiting screen.</li>
-          <li>When both players have left, the room is deleted and the code stops working.</li>
-          <li>Rooms are kept only while the server is running. If the server restarts, every game is lost.</li>
+          <li>Chrome, Edge and Android show an <b>📲 Install app</b> button (bottom right). On iPhone/iPad: Safari → Share → <b>Add to Home Screen</b>.</li>
+          <li>The installed app opens full screen. You still need internet to play.</li>
         </List>
 
         <H>Messages you might see</H>
         <List>
-          <li><b>Room not found</b>: wrong code, or that room no longer exists.</li>
-          <li><b>Room is full</b>: two players are already in it.</li>
-          <li><b>Not your turn</b>: wait for the glowing dice.</li>
-          <li><b>Finish the current challenge first</b>: finish, skip or save the open challenge before rolling.</li>
-          <li><b>Reconnecting to server…</b>: your internet dropped. The game reconnects by itself.</li>
+          <li><b>Room not found</b> / <b>Room is full</b>: wrong code, the room is gone, or two players are already in it.</li>
+          <li><b>This is a private couple game</b>: only the two accounts in that couple can join, each from their own account.</li>
+          <li><b>Your partner hasn&apos;t joined your couple yet</b>: send them your couple code first.</li>
+          <li><b>Not your turn</b> / <b>Finish the current challenge first</b>: wait for the glowing dice, or finish the open challenge.</li>
+          <li><b>The shop opens when you pass START</b> / <b>Not enough coins</b> / <b>You can hold at most 3 cards</b>.</li>
+          <li><b>Session expired</b>: log in again with your username and password.</li>
+          <li><b>That username is taken</b> / <b>Wrong username or password</b>.</li>
         </List>
       </>
     ),
@@ -405,80 +492,75 @@ export default function HowToPlay({ variant = "pill" }: { variant?: "pill" | "li
       </button>
 
       {/* Portal to <body>: blurred panels would otherwise trap a fixed overlay inside them */}
-      {open && createPortal(
-        <div
-          className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/70 backdrop-blur-sm sm:p-4"
-          onClick={() => setOpen(false)}
-          role="dialog"
-          aria-modal="true"
-          aria-label="How to play"
-        >
+      {open &&
+        createPortal(
           <div
-            className="panel flex h-[92vh] sm:h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-b-none sm:rounded-[1.25rem]"
-            style={{ background: "var(--surface)" }}
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/70 backdrop-blur-sm sm:p-4"
+            onClick={() => setOpen(false)}
+            role="dialog"
+            aria-modal="true"
+            aria-label="How to play"
           >
-            {/* HEADER */}
-            <div className="flex items-center justify-between border-b border-line px-5 py-4">
-              <div>
-                <h2 className="text-xl font-black title-gradient">How to play</h2>
-                <p className="text-xs text-muted">Every rule, from the first roll to the last point</p>
+            <div
+              className="panel flex h-[92vh] sm:h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-b-none sm:rounded-[1.25rem]"
+              style={{ background: "var(--surface)" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* HEADER */}
+              <div className="flex items-center justify-between border-b border-line px-5 py-4">
+                <div>
+                  <h2 className="text-xl font-black title-gradient">How to play</h2>
+                  <p className="text-xs text-muted">Every rule, from the first roll to the last point</p>
+                </div>
+                <button onClick={() => setOpen(false)} className="rounded-full border border-line px-2.5 py-1 text-sm text-muted hover:text-white" aria-label="Close">
+                  ✕
+                </button>
               </div>
-              <button
-                onClick={() => setOpen(false)}
-                className="rounded-full border border-line px-2.5 py-1 text-sm text-muted hover:text-white"
-                aria-label="Close"
-              >
-                ✕
-              </button>
-            </div>
 
-            {/* TABS */}
-            <nav className="flex gap-1.5 overflow-x-auto border-b border-line px-4 py-2.5">
-              {SECTIONS.map((s) => (
-                <button
-                  key={s.id}
-                  onClick={() => setActive(s.id)}
-                  className={`shrink-0 rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${
-                    s.id === active ? "border-rose bg-rose/15 text-white" : "border-line text-muted hover:text-white"
-                  }`}
-                >
-                  {s.icon} {s.title}
-                </button>
-              ))}
-            </nav>
+              {/* TABS */}
+              <nav className="flex gap-1.5 overflow-x-auto border-b border-line px-4 py-2.5" role="tablist">
+                {SECTIONS.map((s) => (
+                  <button
+                    key={s.id}
+                    role="tab"
+                    aria-selected={s.id === active}
+                    onClick={() => setActive(s.id)}
+                    className={`shrink-0 rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${
+                      s.id === active ? "border-rose bg-rose/15 text-white" : "border-line text-muted hover:text-white"
+                    }`}
+                  >
+                    {s.icon} {s.title}
+                  </button>
+                ))}
+              </nav>
 
-            {/* CONTENT */}
-            <div key={section.id} className="flex-1 overflow-y-auto px-5 py-4">
-              {section.body}
-            </div>
+              {/* CONTENT */}
+              <div key={section.id} className="flex-1 overflow-y-auto px-5 py-4" role="tabpanel">
+                {section.body}
+              </div>
 
-            {/* FOOTER NAV */}
-            <div className="flex items-center justify-between border-t border-line px-5 py-3">
-              <button
-                onClick={() => setActive(SECTIONS[index - 1].id)}
-                disabled={index === 0}
-                className="text-sm text-muted hover:text-white disabled:opacity-30"
-              >
-                ← {index > 0 ? SECTIONS[index - 1].title : ""}
-              </button>
-              <span className="text-xs text-muted">
-                {index + 1} / {SECTIONS.length}
-              </span>
-              {index < SECTIONS.length - 1 ? (
-                <button onClick={() => setActive(SECTIONS[index + 1].id)} className="btn btn-primary px-4 py-1.5 text-sm">
-                  {SECTIONS[index + 1].title} →
+              {/* FOOTER NAV */}
+              <div className="flex items-center justify-between border-t border-line px-5 py-3">
+                <button onClick={() => setActive(SECTIONS[index - 1].id)} disabled={index === 0} className="text-sm text-muted hover:text-white disabled:opacity-30">
+                  ← {index > 0 ? SECTIONS[index - 1].title : ""}
                 </button>
-              ) : (
-                <button onClick={() => setOpen(false)} className="btn btn-primary px-4 py-1.5 text-sm">
-                  Let&apos;s play!
-                </button>
-              )}
+                <span className="text-xs text-muted">
+                  {index + 1} / {SECTIONS.length}
+                </span>
+                {index < SECTIONS.length - 1 ? (
+                  <button onClick={() => setActive(SECTIONS[index + 1].id)} className="btn btn-primary px-4 py-1.5 text-sm">
+                    {SECTIONS[index + 1].title} →
+                  </button>
+                ) : (
+                  <button onClick={() => setOpen(false)} className="btn btn-primary px-4 py-1.5 text-sm">
+                    Let&apos;s play!
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
-        </div>,
-        document.body,
-      )}
+          </div>,
+          document.body,
+        )}
     </>
   );
 }

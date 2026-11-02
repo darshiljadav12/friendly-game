@@ -4,6 +4,7 @@ const MUTE_KEY = "friendly-game:muted";
 
 let ctx: AudioContext | null = null;
 let muted = false;
+const listeners = new Set<() => void>();
 
 if (typeof window !== "undefined") {
   try {
@@ -12,10 +13,28 @@ if (typeof window !== "undefined") {
     // storage blocked: default to sound on
   }
 
-  // Browsers only allow audio after a user gesture; unlock on the first one
-  const unlock = () => getContext()?.resume();
-  window.addEventListener("pointerdown", unlock, { once: true });
-  window.addEventListener("keydown", unlock, { once: true });
+  // iPhone: play Web Audio as media, so the silent switch doesn't mute the game (Safari 17+)
+  try {
+    const audioSession = (navigator as unknown as { audioSession?: { type: string } }).audioSession;
+    if (audioSession) audioSession.type = "playback";
+  } catch {
+    // not supported
+  }
+
+  // Browsers only allow audio after a user gesture. On touch screens only touchend/click
+  // count (not pointerdown), and phones suspend the audio again after the app was in the
+  // background, so resume on every gesture, not just the first.
+  const unlock = () => {
+    const audio = getContext();
+    if (!audio || audio.state === "running") return;
+    audio.resume().catch(() => {});
+    // iOS only really starts the context once something plays inside the gesture
+    const src = audio.createBufferSource();
+    src.buffer = audio.createBuffer(1, 1, audio.sampleRate);
+    src.connect(audio.destination);
+    src.start(0);
+  };
+  for (const type of ["touchend", "click", "keydown"]) window.addEventListener(type, unlock, { passive: true });
 }
 
 function getContext() {
@@ -31,6 +50,7 @@ function getContext() {
 function tone(freq: number, start: number, duration: number, type: OscillatorType = "sine", volume = 0.15) {
   const audio = getContext();
   if (!audio || muted) return;
+  if (audio.state !== "running") audio.resume().catch(() => {});
 
   const t = audio.currentTime + start;
   const osc = audio.createOscillator();
@@ -50,6 +70,7 @@ function tone(freq: number, start: number, duration: number, type: OscillatorTyp
 function noise(start: number, duration: number, volume = 0.12) {
   const audio = getContext();
   if (!audio || muted) return;
+  if (audio.state !== "running") audio.resume().catch(() => {});
 
   const length = Math.floor(audio.sampleRate * duration);
   const buffer = audio.createBuffer(1, length, audio.sampleRate);
@@ -71,6 +92,12 @@ function noise(start: number, duration: number, volume = 0.12) {
 export const sound = {
   isMuted: () => muted,
 
+  // For useSyncExternalStore, so the mute button re-renders when this changes
+  subscribe(listener: () => void) {
+    listeners.add(listener);
+    return () => listeners.delete(listener);
+  },
+
   setMuted(value: boolean) {
     muted = value;
     try {
@@ -78,6 +105,7 @@ export const sound = {
     } catch {
       // ignore
     }
+    listeners.forEach((l) => l());
   },
 
   roll() {

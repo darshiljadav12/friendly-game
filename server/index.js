@@ -1,8 +1,21 @@
+const path = require("path");
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const cors = require("cors");
-const QUESTIONS = require("./questions");
+
+// Load server/.env when present (Node 20.12+); real env vars take precedence
+try {
+  process.loadEnvFile(path.join(__dirname, ".env"));
+} catch {
+  // no .env file: fine, use the environment as-is
+}
+
+const C = require("./config");
+const db = require("./db");
+const game = require("./game");
+const couples = require("./couples");
+const achievements = require("./achievements");
 
 const PORT = process.env.PORT || 5000;
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || "*";
@@ -10,7 +23,7 @@ const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || "*";
 const app = express();
 app.use(cors({ origin: CLIENT_ORIGIN }));
 
-app.get("/health", (_req, res) => res.json({ ok: true }));
+app.get("/health", (_req, res) => res.json({ ok: true, db: db.isConnected() }));
 
 const server = http.createServer(app);
 
@@ -19,80 +32,10 @@ const io = new Server(server, {
 });
 
 /* =========================
-   GAME CONFIG
-========================= */
-
-const MAX_PLAYERS = 2;
-const BOARD_SIZE = 28; // must match the 8x8 ring layout on the client
-const DICE_DELAY_MS = 700; // matches dice animation time
-const RECONNECT_GRACE_MS = 60_000;
-const MAX_NAME_LENGTH = 20;
-const MAX_ANSWER_LENGTH = 80;
-
-const LAP_BONUS = 5;
-const HEART_POINTS = 5; // per heart when the partner rates an answer
-const WILD_STEAL = 10;
-const WILD_BACK_STEPS = 3;
-const TIMED_DARE_MS = 30_000;
-const TIMER_GRACE_MS = 1_000; // allows for network lag on the Done press
-const MAX_POWER_UPS = 3;
-const COOP_POINTS_PER_ROUND = 30; // co-op goal = rounds * this (test games averaged ~22–43 per round)
-const REACTION_COOLDOWN_MS = 250;
-
-// Chosen by the room creator
-const LENGTH_OPTIONS = {
-  5: { rounds: 5 },
-  10: { rounds: 10 },
-  20: { rounds: 20 },
-  points150: { target: 150 },
-};
-
-const REACTIONS = ["😂", "❤️", "😳", "🔥", "😍", "👏"];
-const POWER_UPS = ["freePass", "reroll", "handOff"];
-const POWER_UP_NAMES = { freePass: "Free Pass", reroll: "Reroll", handOff: "Pass It On" };
-
-const TILE_PATTERN = ["love", "dare", "guess", "memory", "wild", "gift", "dare", "timed", "love"];
-
-// Board is defined only here and sent to clients, so both sides always agree
-const BOARD = [
-  "start",
-  ...Array.from({ length: BOARD_SIZE - 1 }, (_, i) => TILE_PATTERN[i % TILE_PATTERN.length]),
-];
-
-// Base points for completing a challenge (skipping gives 0)
-const POINTS = {
-  love: 10,
-  memory: 10,
-  dare: 20,
-  gift: 15,
-  timed: 15, // doubled when finished in time
-  guess: 15, // to both players on a match
-  together: 10, // to both players
-};
-
-// The partner rates these with 1–3 hearts instead of a fixed score
-const RATED_TYPES = new Set(["love", "memory"]);
-
-/* =========================
-   IN-MEMORY STORAGE
+   IN-MEMORY ROOMS
 ========================= */
 
 const rooms = {};
-
-/* =========================
-   HELPERS
-========================= */
-
-function shuffle(list) {
-  const arr = [...list];
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-  return arr;
-}
-
-const pick = (list) => list[Math.floor(Math.random() * list.length)];
 
 function generateRoomId() {
   let id;
@@ -102,269 +45,37 @@ function generateRoomId() {
   return id;
 }
 
-function cleanText(text, max) {
-  if (typeof text !== "string") return "";
-  return text.trim().slice(0, max);
+const coupleChannel = (code) => `couple:${code}`;
+
+function pushCouple(couple) {
+  if (couple) io.to(coupleChannel(couple._id)).emit("coupleUpdate", couples.overview(couple));
 }
 
-function parseSettings(raw = {}) {
-  const mode = raw.mode === "coop" ? "coop" : "competitive";
-  let length = LENGTH_OPTIONS[raw.length] ? String(raw.length) : "10";
+// Saves a finished couple game once, then shows any newly unlocked achievements
+async function recordIfFinished(room) {
+  if (room.phase !== "finished" || !room.coupleCode || room.recordedGameNo === room.gameNo) return;
+  room.recordedGameNo = room.gameNo;
 
-  // Co-op needs a round limit, otherwise you can never lose
-  if (mode === "coop" && LENGTH_OPTIONS[length].target) length = "10";
-
-  const option = LENGTH_OPTIONS[length];
-  return {
-    mode,
-    length,
-    rounds: option.rounds ?? null,
-    target: option.target ?? null,
-    coopGoal: mode === "coop" ? option.rounds * COOP_POINTS_PER_ROUND : null,
-  };
-}
-
-function createRoom(roomId, settings) {
-  return {
-    id: roomId,
-    phase: "waiting", // waiting | playing | finished
-    settings,
-    players: [],
-    turn: 0,
-    rolling: false,
-    freeRolls: 0, // extra rolls (from a 6 or a Reroll card) that do not use up a turn
-    challenge: null,
-    event: null, // latest announcement shown as a toast: { id, playerId, text }
-    eventSeq: 0,
-    winnerIds: [],
-    coopWon: null,
-    decks: {},
-  };
-}
-
-function createPlayer(playerId, username, socketId) {
-  return {
-    id: playerId,
-    socketId,
-    username,
-    connected: true,
-    position: 0,
-    score: 0,
-    turnsTaken: 0,
-    savedDares: [], // dares put off for later: { id, question, points }
-    powerUps: [],
-    doubleNext: false, // from a wild tile: next challenge points are doubled
-    removeTimer: null,
-  };
-}
-
-function resetGame(room) {
-  room.turn = 0;
-  room.rolling = false;
-  room.freeRolls = 0;
-  room.challenge = null;
-  room.event = null;
-  room.winnerIds = [];
-  room.coopWon = null;
-  room.decks = {};
-  room.players.forEach((p) => {
-    p.position = 0;
-    p.score = 0;
-    p.turnsTaken = 0;
-    p.savedDares = [];
-    p.powerUps = [];
-    p.doubleNext = false;
-  });
-  room.phase = room.players.length === MAX_PLAYERS ? "playing" : "waiting";
-}
-
-// Draw without repeats until the deck runs out, then reshuffle
-function drawQuestion(room, type) {
-  const list = QUESTIONS[type];
-  if (!list) return null;
-
-  if (!room.decks[type] || room.decks[type].length === 0) {
-    room.decks[type] = shuffle(list);
+  try {
+    const result = await couples.recordGame(room);
+    if (!result) return;
+    if (room.results) room.results.newlyUnlocked = result.newlyUnlocked;
+    broadcast(room);
+    pushCouple(result.couple);
+  } catch (err) {
+    console.error(`❌ Failed to record game for ${room.coupleCode}:`, err.message);
   }
-  return room.decks[type].pop();
 }
 
-const otherPlayer = (room, player) => room.players.find((p) => p.id !== player.id);
-
-function setEvent(room, playerId, text) {
-  room.eventSeq += 1;
-  room.event = { id: room.eventSeq, playerId, text };
-}
-
-// Adds challenge points, applying a pending "double next" bonus
-function award(player, points) {
-  if (player.doubleNext) {
-    points *= 2;
-    player.doubleNext = false;
-  }
-  player.score += points;
-}
-
-function makeChallenge(room, type, player) {
-  return {
-    type,
-    question: drawQuestion(room, type),
-    points: POINTS[type] || 0,
-    ownerId: player.id, // who landed on it
-    playerId: player.id, // who has to do it (changes with Pass It On)
-    stage: type === "guess" ? "guessing" : "pending", // pending | rating | timing | guessing | reveal
-    handedOff: false,
-    endsAt: null,
-    answer: null,
-    guess: null,
-    confirmed: {},
-  };
-}
-
-// Hides the guess-tile answers until both are locked in
-function publicChallenge(c) {
-  if (!c) return null;
-  const revealed = c.stage === "reveal";
-  return {
-    type: c.type,
-    question: c.question,
-    points: c.points,
-    ownerId: c.ownerId,
-    playerId: c.playerId,
-    stage: c.stage,
-    handedOff: c.handedOff,
-    remainingMs: c.endsAt ? Math.max(0, c.endsAt - Date.now()) : null,
-    hasAnswer: c.answer !== null,
-    hasGuess: c.guess !== null,
-    answer: revealed ? c.answer : null,
-    guess: revealed ? c.guess : null,
-    confirmed: Object.keys(c.confirmed),
-  };
-}
-
-// Only send what clients need (no socket ids, timers or decks)
-function publicState(room) {
-  return {
-    id: room.id,
-    phase: room.phase,
-    settings: room.settings,
-    board: BOARD,
-    turn: room.turn,
-    freeRoll: room.freeRolls > 0,
-    challenge: publicChallenge(room.challenge),
-    event: room.event,
-    winnerIds: room.winnerIds,
-    coopWon: room.coopWon,
-    players: room.players.map((p) => ({
-      id: p.id,
-      username: p.username,
-      connected: p.connected,
-      position: p.position,
-      score: p.score,
-      turnsTaken: p.turnsTaken,
-      savedDares: p.savedDares,
-      powerUps: p.powerUps,
-      doubleNext: p.doubleNext,
-    })),
-  };
-}
-
+// Every state change goes through here, so it's also where rooms get persisted
 function broadcast(room, move = null) {
-  io.to(room.id).emit("roomState", { state: publicState(room), move });
+  io.to(room.id).emit("roomState", { state: game.publicState(room), move });
+  db.saveRoom(room);
 }
 
-function finishGame(room) {
-  room.challenge = null;
-  room.freeRolls = 0;
-  room.phase = "finished";
-
-  if (room.settings.mode === "coop") {
-    const total = room.players.reduce((sum, p) => sum + p.score, 0);
-    room.coopWon = total >= room.settings.coopGoal;
-    room.winnerIds = room.coopWon ? room.players.map((p) => p.id) : [];
-    return;
-  }
-
-  const best = Math.max(...room.players.map((p) => p.score));
-  room.winnerIds = room.players.filter((p) => p.score === best).map((p) => p.id);
-}
-
-// "First to N points" ends the game as soon as someone gets there
-function reachedTarget(room) {
-  const { target } = room.settings;
-  return target !== null && room.players.some((p) => p.score >= target);
-}
-
-function endTurn(room) {
-  room.challenge = null;
-
-  if (reachedTarget(room)) return finishGame(room);
-
-  // Bonus roll / reroll: same player goes again
-  if (room.freeRolls > 0) return;
-
-  const { rounds } = room.settings;
-  if (rounds !== null && room.players.every((p) => p.turnsTaken >= rounds)) {
-    return finishGame(room);
-  }
-
-  room.turn = (room.turn + 1) % room.players.length;
-}
-
-function applyWild(room, player, partner) {
-  let effect = pick(["swap", "steal", "back", "double"]);
-  if (effect === "swap" && (!partner || partner.position === player.position)) effect = "double";
-
-  switch (effect) {
-    case "swap":
-      [player.position, partner.position] = [partner.position, player.position];
-      return `⚡ Wild! ${player.username} swapped places with ${partner.username}`;
-
-    case "steal": {
-      // Nothing to steal from in co-op, so it becomes a plain bonus
-      if (room.settings.mode === "coop" || !partner) {
-        player.score += WILD_STEAL;
-        return `⚡ Wild! Lucky bonus: ${player.username} gets +${WILD_STEAL}`;
-      }
-      const amount = Math.min(WILD_STEAL, partner.score);
-      partner.score -= amount;
-      player.score += amount;
-      return `⚡ Wild! ${player.username} stole ${amount} points from ${partner.username}`;
-    }
-
-    case "back":
-      player.position = (player.position - WILD_BACK_STEPS + BOARD.length) % BOARD.length;
-      return `⚡ Wild! ${player.username} moves back ${WILD_BACK_STEPS} tiles`;
-
-    default:
-      player.doubleNext = true;
-      return `⚡ Wild! ${player.username}'s next challenge is worth double`;
-  }
-}
-
-// Decides what happens on the tile the player just landed on
-function landOn(room, player, messages) {
-  const partner = otherPlayer(room, player);
-  const tile = BOARD[player.position];
-
-  if (partner && partner.position === player.position) {
-    room.challenge = makeChallenge(room, "together", player);
-    messages.push(`💑 ${player.username} landed on ${partner.username}: together challenge!`);
-    return;
-  }
-
-  if (tile === "wild") {
-    messages.push(applyWild(room, player, partner));
-    endTurn(room);
-    return;
-  }
-
-  if (tile === "start") {
-    endTurn(room);
-    return;
-  }
-
-  room.challenge = makeChallenge(room, tile, player);
+function commit(room, move = null) {
+  broadcast(room, move);
+  recordIfFinished(room);
 }
 
 function findPlayerBySocket(socketId) {
@@ -377,16 +88,29 @@ function findPlayerBySocket(socketId) {
 
 function removePlayer(room, playerId) {
   room.players = room.players.filter((p) => p.id !== playerId);
+  if (room.creatorId === playerId) room.creatorId = room.players[0]?.id ?? null; // the one who stays takes over
 
   if (room.players.length === 0) {
     delete rooms[room.id];
+    db.deleteRoom(room.id);
+    if (room.coupleCode) couples.clearActiveRoom(room.coupleCode, room.id).then(pushCouple).catch(() => {});
     console.log(`🧹 Room deleted: ${room.id}`);
     return;
   }
 
   // Partner is gone for good → back to the waiting room so someone can join
-  resetGame(room);
+  game.resetGame(room);
   broadcast(room);
+}
+
+// Keep the seat for a while so a refresh (or server restart) doesn't end the game
+function scheduleRemoval(room, player) {
+  clearTimeout(player.removeTimer);
+  player.removeTimer = setTimeout(() => {
+    if (player.connected) return;
+    console.log(`⌛ ${player.username} did not come back to ${room.id}`);
+    removePlayer(room, player.id);
+  }, C.RECONNECT_GRACE_MS);
 }
 
 function seatPlayer(socket, room, player) {
@@ -403,6 +127,15 @@ function seatPlayer(socket, room, player) {
 io.on("connection", (socket) => {
   console.log("✅ User connected:", socket.id);
 
+  // Rule constants the client shows in the UI (shop prices, achievements…)
+  socket.emit("meta", {
+    achievements: achievements.definitions(),
+    powerUps: C.POWER_UPS,
+    boardPresets: Object.keys(C.BOARD_PRESETS),
+    themes: C.THEMES,
+    persistent: db.isConnected(),
+  });
+
   // Resolves the room + player for this socket, or reports why it can't
   const getSeat = () => {
     const room = rooms[socket.data.roomId];
@@ -410,55 +143,241 @@ io.on("connection", (socket) => {
     return room && player ? { room, player } : null;
   };
 
-  const fail = (message) => socket.emit("errorMessage", message);
+  const fail = (message) => message && socket.emit("errorMessage", message);
+  const reply = (ack, payload) => typeof ack === "function" && ack(payload);
+
+  // Checks the account session sent with a request; resolves only when the user is in a couple
+  const authCouple = async (session) => {
+    const auth = await couples.authenticate(session);
+    return auth && auth.couple ? { couple: auth.couple, slot: auth.slot, user: auth.user } : null;
+  };
+
+  // Live couple updates (partner joined, IOU done, game saved…) go to this channel
+  const followCouple = (couple, slot) => {
+    if (socket.data.couple?.code && socket.data.couple.code !== couple._id) socket.leave(coupleChannel(socket.data.couple.code));
+    socket.join(coupleChannel(couple._id));
+    socket.data.couple = { code: couple._id, slot };
+  };
+
+  const guarded = (handler, failure) => async (payload, ack) => {
+    try {
+      reply(ack, await handler(payload ?? {}));
+    } catch (err) {
+      console.error(err);
+      reply(ack, { error: failure });
+    }
+  };
+
+  /* -------- ACCOUNTS -------- */
+  socket.on("accountSignup", guarded((payload) => couples.signup(payload), "Couldn't sign up, try again"));
+
+  socket.on(
+    "accountLogin",
+    guarded(async (payload) => {
+      const result = await couples.login(payload);
+      if (result.overview) followCouple({ _id: result.overview.code }, result.slot);
+      return result;
+    }, "Couldn't log in, try again"),
+  );
+
+  // Called on page load with the saved session
+  socket.on(
+    "accountAuth",
+    guarded(async (session) => {
+      const auth = await couples.authenticate(session);
+      if (!auth) return { error: "Session expired, please log in again" };
+
+      if (auth.couple) {
+        followCouple(auth.couple, auth.slot);
+        // Drop a stale active room (e.g. after it expired)
+        if (auth.couple.activeRoomId && !rooms[auth.couple.activeRoomId]) {
+          await couples.clearActiveRoom(auth.couple._id, auth.couple.activeRoomId);
+          auth.couple.activeRoomId = null;
+        }
+      }
+      return couples.accountView(auth.user, auth.couple);
+    }, "Couldn't check your login"),
+  );
+
+  socket.on("accountLogout", async (session) => {
+    if (socket.data.couple) socket.leave(coupleChannel(socket.data.couple.code));
+    socket.data.couple = null;
+    await couples.logout(session).catch(() => {});
+  });
+
+  /* -------- COUPLE LINKING -------- */
+  socket.on(
+    "coupleCreate",
+    guarded(async (session) => {
+      const auth = await couples.authenticate(session);
+      if (!auth) return { error: "Session expired, please log in again" };
+      const result = await couples.createCouple(auth.user);
+      if (result.error) return result;
+      followCouple(result.couple, result.slot);
+      const { couple, ...view } = result; // eslint-disable-line no-unused-vars
+      return view;
+    }, "Couldn't create the couple, try again"),
+  );
+
+  socket.on(
+    "coupleJoin",
+    guarded(async ({ session, code }) => {
+      const auth = await couples.authenticate(session);
+      if (!auth) return { error: "Session expired, please log in again" };
+      const result = await couples.joinCouple(auth.user, code);
+      if (result.error) return result;
+      followCouple(result.couple, result.slot);
+      pushCouple(result.couple); // the partner sees them arrive
+      const { couple, ...view } = result; // eslint-disable-line no-unused-vars
+      return view;
+    }, "Couldn't join the couple, try again"),
+  );
+
+  socket.on("coupleHistory", async (session, ack) => {
+    const auth = await authCouple(session).catch(() => null);
+    if (!auth) return reply(ack, { error: "Session expired, please log in again" });
+    reply(ack, { games: await db.listGames(auth.couple._id) });
+  });
+
+  socket.on("coupleMemories", async (session, ack) => {
+    const auth = await authCouple(session).catch(() => null);
+    if (!auth) return reply(ack, { error: "Session expired, please log in again" });
+    reply(ack, { memories: await db.listMemories(auth.couple._id) });
+  });
+
+  socket.on("coupleFavorite", async ({ session, memoryId, favorite } = {}, ack) => {
+    const auth = await authCouple(session).catch(() => null);
+    if (!auth) return reply(ack, { error: "Session expired, please log in again" });
+    await db.setMemoryFavorite(auth.couple._id, String(memoryId), Boolean(favorite));
+    reply(ack, { ok: true });
+  });
+
+  socket.on("coupleCompleteIou", async ({ session, iouId } = {}, ack) => {
+    const auth = await authCouple(session).catch(() => null);
+    if (!auth) return reply(ack, { error: "Session expired, please log in again" });
+
+    const result = await couples.completeIou(auth.couple._id, auth.slot, iouId);
+    if (result.error) return reply(ack, { error: result.error });
+
+    // Show it in the activity feed of a game they're playing right now
+    const seat = getSeat();
+    if (seat && seat.room.coupleCode === auth.couple._id) {
+      game.addLog(seat.room, seat.player.id, "💌", `${seat.player.username} kept a promise from the IOU wallet`, result.dare.question);
+      broadcast(seat.room);
+    }
+
+    pushCouple(result.couple);
+    if (result.unlocked.length) {
+      io.to(coupleChannel(auth.couple._id)).emit("achievementsUnlocked", { slot: auth.slot, ids: result.unlocked });
+    }
+    reply(ack, { ok: true });
+  });
 
   /* -------- CREATE ROOM -------- */
-  socket.on("createRoom", ({ username, playerId, settings } = {}) => {
-    const name = cleanText(username, MAX_NAME_LENGTH);
-    if (!name) return fail("Please enter your name");
+  socket.on("createRoom", async ({ username, playerId, settings, couple } = {}) => {
     if (typeof playerId !== "string" || !playerId) return fail("Missing player id");
     if (getSeat()) return fail("You are already in a room");
 
-    const room = createRoom(generateRoomId(), parseSettings(settings));
-    const player = createPlayer(playerId, name, socket.id);
+    let name = game.cleanText(username, C.MAX_NAME_LENGTH);
+    let coupleCode = null;
+    let slot = null;
+
+    if (couple) {
+      const auth = await authCouple(couple).catch(() => null);
+      if (!auth) return fail("Session expired, please log in again");
+      if (auth.couple.members.length < 2) return fail("Your partner hasn't joined your couple yet. Share your couple code with them");
+      coupleCode = auth.couple._id;
+      slot = auth.slot;
+      name = auth.couple.members[slot].name;
+    }
+    if (!name) return fail("Please enter your name");
+
+    const room = game.createRoom(generateRoomId(), game.parseSettings(settings), coupleCode);
+    const player = game.createPlayer(playerId, name, socket.id, slot);
+    room.creatorId = player.id;
     room.players.push(player);
     rooms[room.id] = room;
 
     seatPlayer(socket, room, player);
-    console.log(`🟢 Room created: ${room.id} by ${name}`, room.settings);
+    console.log(`🟢 Room created: ${room.id} by ${name}${coupleCode ? ` (couple ${coupleCode})` : ""}`);
     broadcast(room);
+
+    if (coupleCode) pushCouple(await couples.setActiveRoom(coupleCode, room.id));
   });
 
   /* -------- JOIN ROOM -------- */
-  socket.on("joinRoom", ({ roomId, username, playerId } = {}) => {
-    const name = cleanText(username, MAX_NAME_LENGTH);
+  socket.on("joinRoom", async ({ roomId, username, playerId, couple } = {}) => {
     const code = typeof roomId === "string" ? roomId.trim().toUpperCase() : "";
     const room = rooms[code];
 
-    if (!name) return fail("Please enter your name");
     if (typeof playerId !== "string" || !playerId) return fail("Missing player id");
     if (getSeat()) return fail("You are already in a room");
     if (!room) return fail("Room not found");
-    if (room.players.some((p) => p.id === playerId)) return fail("You are already in this room");
-    if (room.players.length >= MAX_PLAYERS) return fail("Room is full");
+    // (couple rooms check the account instead, and a seat can move between browsers)
+    if (!room.coupleCode && room.players.some((p) => p.id === playerId)) return fail("You are already in this room");
+    if (!room.coupleCode && room.players.length >= C.MAX_PLAYERS) return fail("Room is full");
 
-    const player = createPlayer(playerId, name, socket.id);
+    let name = game.cleanText(username, C.MAX_NAME_LENGTH);
+    let slot = null;
+
+    // Couple rooms are private: only the other half of that couple can join
+    if (room.coupleCode) {
+      const auth = await authCouple(couple).catch(() => null);
+      if (!auth || auth.couple._id !== room.coupleCode) {
+        return fail("This is a private couple game. Log in to an account in that couple to join");
+      }
+      // Already seated from another browser: the game moves here and that browser is signed out
+      const seated = room.players.find((p) => p.slot === auth.slot);
+      if (seated) return takeOverSeat(room, seated, couple);
+      slot = auth.slot;
+      name = auth.couple.members[slot].name;
+    }
+    if (!name) return fail("Please enter your name");
+    if (!rooms[code] || room.players.length >= C.MAX_PLAYERS) return fail("Room is full");
+    if (room.players.some((p) => p.id === playerId)) return fail("You are already in this room");
+
+    const player = game.createPlayer(playerId, name, socket.id, slot);
     room.players.push(player);
     seatPlayer(socket, room, player);
 
     console.log(`🟡 ${name} joined room: ${room.id}`);
 
-    if (room.players.length === MAX_PLAYERS) resetGame(room);
+    if (room.players.length === C.MAX_PLAYERS) game.resetGame(room);
     broadcast(room);
   });
 
-  /* -------- REJOIN (page refresh / network drop) -------- */
-  socket.on("rejoinRoom", ({ roomId, playerId } = {}) => {
+  // Moves a couple seat from the browser that had it to this one
+  const takeOverSeat = async (room, player, session) => {
+    const previous = player.socketId !== socket.id ? io.sockets.sockets.get(player.socketId) : null;
+    if (previous) {
+      previous.leave(room.id);
+      if (previous.data.couple) previous.leave(coupleChannel(previous.data.couple.code));
+      previous.data.roomId = null;
+      previous.data.playerId = null;
+      previous.data.couple = null;
+      previous.emit("seatMoved");
+    }
+    await couples.logoutOthers(session).catch(() => {});
+
+    clearTimeout(player.removeTimer);
+    player.removeTimer = null;
+    player.socketId = socket.id;
+    player.connected = true;
+
+    seatPlayer(socket, room, player);
+    console.log(`📲 ${player.username} moved to another browser in room: ${room.id}`);
+    broadcast(room);
+  };
+
+  /* -------- REJOIN (page refresh / network drop / server restart) -------- */
+  socket.on("rejoinRoom", async ({ roomId, playerId, couple } = {}) => {
     const room = rooms[roomId];
     const player = room?.players.find((p) => p.id === playerId);
 
-    if (!player) {
-      socket.emit("rejoinFailed");
+    // In couple games the account must still be logged in here (it's signed out when the game moves to another browser)
+    const allowed = player && (!room.coupleCode || (await authCouple(couple).catch(() => null))?.slot === player.slot);
+    if (!allowed || getSeat()) {
+      if (!allowed) socket.emit("rejoinFailed");
       return;
     }
 
@@ -484,6 +403,7 @@ io.on("connection", (socket) => {
     if (room.challenge) return fail("Finish the current challenge first");
 
     room.rolling = true;
+    player.shopOpen = false; // your next roll closes your shop
     const isFreeRoll = room.freeRolls > 0;
     if (isFreeRoll) room.freeRolls -= 1;
     const dice = Math.floor(Math.random() * 6) + 1;
@@ -497,216 +417,69 @@ io.on("connection", (socket) => {
         return;
       }
 
-      const steps = [];
-      let current = player.position;
-      for (let i = 0; i < dice; i++) {
-        current = (current + 1) % BOARD.length;
-        steps.push(current);
-      }
-
-      player.position = current;
-      if (!isFreeRoll) player.turnsTaken += 1;
       room.rolling = false;
-
-      const messages = [];
-
-      // Passing (or landing on) START: lap bonus + a power-up card
-      if (steps.includes(0)) {
-        player.score += LAP_BONUS;
-        let text = `⭐ ${player.username} passed START: +${LAP_BONUS}`;
-        if (player.powerUps.length < MAX_POWER_UPS) {
-          const card = pick(POWER_UPS);
-          player.powerUps.push(card);
-          text += ` and a ${POWER_UP_NAMES[card]} card`;
-        }
-        messages.push(text);
-      }
-
-      if (dice === 6) {
-        room.freeRolls += 1;
-        messages.push(`🎲 ${player.username} rolled a 6: bonus roll!`);
-      }
-
-      landOn(room, player, messages);
-      if (messages.length) setEvent(room, player.id, messages.join("  ·  "));
-
-      console.log(`🎲 ${player.username} rolled ${dice} → ${BOARD[player.position]}`);
-      broadcast(room, { playerId: player.id, dice, steps });
-    }, DICE_DELAY_MS);
+      const move = game.resolveRoll(room, player, dice, isFreeRoll);
+      console.log(`🎲 ${player.username} rolled ${dice} → ${room.board[player.position]}`);
+      commit(room, move);
+    }, C.DICE_DELAY_MS);
   });
 
   /* -------- CHALLENGE ACTIONS -------- */
-  socket.on("challengeAction", ({ action, hearts, text } = {}) => {
+  socket.on("challengeAction", (payload = {}) => {
     const seat = getSeat();
     if (!seat) return;
-    const { room, player } = seat;
-    const c = room.challenge;
-    if (!c || room.phase !== "playing") return;
 
-    const isDoer = c.playerId === player.id;
-    const doer = room.players.find((p) => p.id === c.playerId);
-    const partner = otherPlayer(room, doer);
-
-    // Together: both press Done (both score), either can skip
-    if (c.type === "together") {
-      if (action === "skip") {
-        endTurn(room);
-      } else if (action === "done") {
-        c.confirmed[player.id] = true;
-        if (room.players.every((p) => c.confirmed[p.id])) {
-          room.players.forEach((p) => award(p, c.points));
-          endTurn(room);
-        }
-      }
-      return broadcast(room);
-    }
-
-    switch (c.stage) {
-      case "guessing": {
-        if (action === "skip" && isDoer) {
-          endTurn(room);
-          break;
-        }
-        const value = cleanText(text, MAX_ANSWER_LENGTH);
-        if (!value) return fail("Type something first");
-
-        if (action === "answer" && isDoer) c.answer = value;
-        else if (action === "guess" && !isDoer) c.guess = value;
-        else return;
-
-        if (c.answer !== null && c.guess !== null) c.stage = "reveal";
-        break;
-      }
-
-      case "reveal": {
-        // The person the question is about decides if the guess was right
-        if (!isDoer) return;
-        if (action === "match") {
-          award(doer, c.points);
-          if (partner) award(partner, c.points);
-        } else if (action !== "nomatch") {
-          return;
-        }
-        endTurn(room);
-        break;
-      }
-
-      case "rating": {
-        if (isDoer || action !== "rate") return;
-        const count = Math.round(Number(hearts));
-        if (!(count >= 1 && count <= 3)) return;
-        award(doer, count * HEART_POINTS);
-        endTurn(room);
-        break;
-      }
-
-      case "timing": {
-        if (!isDoer) return;
-        if (action === "done") {
-          const inTime = Date.now() <= c.endsAt + TIMER_GRACE_MS;
-          award(doer, inTime ? c.points * 2 : c.points);
-        } else if (action !== "skip") {
-          return;
-        }
-        endTurn(room);
-        break;
-      }
-
-      case "pending": {
-        if (!isDoer) return;
-
-        if (action === "done") {
-          if (RATED_TYPES.has(c.type)) {
-            c.stage = "rating";
-            break;
-          }
-          award(doer, c.points);
-        } else if (action === "startTimer" && c.type === "timed") {
-          c.stage = "timing";
-          c.endsAt = Date.now() + TIMED_DARE_MS;
-          break;
-        } else if (action === "save") {
-          if (c.type !== "dare") return fail("Only dares can be saved for later");
-          doer.savedDares.push({
-            id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-            question: c.question,
-            points: c.points,
-          });
-        } else if (action !== "skip") {
-          return;
-        }
-        endTurn(room);
-        break;
-      }
-    }
-
-    broadcast(room);
+    const error = game.challengeAction(seat.room, seat.player, payload);
+    if (error === null) commit(seat.room);
+    else fail(error);
   });
 
-  /* -------- POWER-UP CARDS -------- */
-  socket.on("usePowerUp", ({ card } = {}) => {
+  /* -------- POWER-UP CARDS + SHOP -------- */
+  socket.on("usePowerUp", ({ card, target } = {}) => {
     const seat = getSeat();
     if (!seat) return;
-    const { room, player } = seat;
-    const c = room.challenge;
 
-    if (room.phase !== "playing" || !c) return fail("Cards can only be used on a challenge");
-    if (c.type === "together" || c.stage !== "pending" && c.stage !== "guessing") return fail("You can't use a card right now");
-    if (c.ownerId !== player.id || c.playerId !== player.id) return fail("You can only use cards on your own challenge");
-    if (c.stage === "guessing" && (c.answer !== null || c.guess !== null)) return fail("Too late, answers are already in");
-
-    const index = player.powerUps.indexOf(card);
-    if (index === -1) return;
-
-    const partner = otherPlayer(room, player);
-
-    if (card === "freePass") {
-      award(player, c.points);
-      setEvent(room, player.id, `🎟️ ${player.username} used a Free Pass: +${c.points} without doing it`);
-      endTurn(room);
-    } else if (card === "reroll") {
-      room.challenge = null;
-      room.freeRolls += 1;
-      setEvent(room, player.id, `🎲 ${player.username} used a Reroll and rolls again`);
-    } else if (card === "handOff") {
-      if (c.type === "guess" || !partner) return fail("Pass It On doesn't work on guess questions");
-      c.playerId = partner.id;
-      c.handedOff = true;
-      setEvent(room, player.id, `😈 ${player.username} passed the challenge to ${partner.username}!`);
-    } else {
-      return;
-    }
-
-    player.powerUps.splice(index, 1);
-    broadcast(room);
+    const result = game.usePowerUp(seat.room, seat.player, card, target);
+    if (result.error) return fail(result.error);
+    commit(seat.room, result.move ?? null);
   });
 
-  /* -------- COMPLETE A SAVED DARE -------- */
-  // Can be done any time while the game is running, not just on your turn
+  socket.on("buyCard", ({ card } = {}) => {
+    const seat = getSeat();
+    if (!seat) return;
+
+    const error = game.buyCard(seat.room, seat.player, card);
+    if (error) return fail(error);
+    broadcast(seat.room);
+  });
+
+  /* -------- THEME / ACCESSIBILITY (room creator only) -------- */
+  socket.on("updateLook", (payload = {}) => {
+    const seat = getSeat();
+    if (!seat) return;
+
+    const error = game.updateLook(seat.room, seat.player, payload);
+    if (error) return fail(error);
+    broadcast(seat.room);
+  });
+
+  /* -------- COMPLETE A SAVED DARE / GIFT (this game) -------- */
   socket.on("completeSavedDare", ({ dareId } = {}) => {
     const seat = getSeat();
     if (!seat) return;
-    const { room, player } = seat;
 
-    if (room.phase !== "playing") return fail("Saved dares can only be completed during a game");
-
-    const dare = player.savedDares.find((d) => d.id === dareId);
-    if (!dare) return;
-
-    player.savedDares = player.savedDares.filter((d) => d.id !== dareId);
-    player.score += dare.points;
-
-    if (reachedTarget(room)) finishGame(room);
-    broadcast(room);
+    const error = game.completeSavedDare(seat.room, seat.player, dareId);
+    if (error === null) commit(seat.room);
+    else fail(error);
   });
 
   /* -------- REACTIONS -------- */
   socket.on("react", ({ emoji } = {}) => {
     const seat = getSeat();
-    if (!seat || !REACTIONS.includes(emoji)) return;
+    if (!seat || !C.REACTIONS.includes(emoji)) return;
 
     const now = Date.now();
-    if (now - (socket.data.lastReaction || 0) < REACTION_COOLDOWN_MS) return;
+    if (now - (socket.data.lastReaction || 0) < C.REACTION_COOLDOWN_MS) return;
     socket.data.lastReaction = now;
 
     io.to(seat.room.id).emit("reaction", { id: `${now}-${seat.player.id}`, playerId: seat.player.id, emoji });
@@ -717,7 +490,7 @@ io.on("connection", (socket) => {
     const seat = getSeat();
     if (!seat || seat.room.phase !== "finished") return;
 
-    resetGame(seat.room);
+    game.resetGame(seat.room);
     broadcast(seat.room);
   });
 
@@ -741,15 +514,9 @@ io.on("connection", (socket) => {
     if (!seat) return;
     const { room, player } = seat;
 
-    // Keep the seat for a while so a refresh doesn't end the game
     player.connected = false;
     broadcast(room);
-
-    player.removeTimer = setTimeout(() => {
-      if (player.connected) return;
-      console.log(`⌛ ${player.username} did not come back to ${room.id}`);
-      removePlayer(room, player.id);
-    }, RECONNECT_GRACE_MS);
+    scheduleRemoval(room, player);
   });
 });
 
@@ -757,6 +524,40 @@ io.on("connection", (socket) => {
    SERVER START
 ========================= */
 
-server.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-});
+async function start() {
+  const uri = process.env.MONGODB_URI;
+
+  if (uri) {
+    try {
+      await db.connect(uri);
+
+      // Bring back saved rooms; players get the usual grace period to reconnect
+      for (const saved of await db.loadRooms()) {
+        const room = game.normalizeRoom(saved);
+        rooms[room.id] = room;
+        room.players.forEach((p) => scheduleRemoval(room, p));
+      }
+      console.log(`📦 Restored ${Object.keys(rooms).length} room(s)`);
+    } catch (err) {
+      console.error("❌ MongoDB connection failed, running WITHOUT persistence:", err.message);
+    }
+  } else {
+    console.warn("⚠️  MONGODB_URI not set, rooms and couples are kept in memory only");
+  }
+
+  server.listen(PORT, () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+  });
+}
+
+// Flush pending saves before exiting (Ctrl+C, nodemon restart, deploy)
+async function shutdown(signal) {
+  console.log(`\n${signal} received, saving rooms…`);
+  await db.close().catch(() => {});
+  process.exit(0);
+}
+
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+
+start();

@@ -51,7 +51,10 @@ export default function Dice({
   }, [value, rolling]);
 
   return (
-    <div className="perspective w-20 h-20">
+    // pointer-events-none: a face turned edge-on in 3D projects a huge invisible hit
+    // area that would swallow taps on things below the board (e.g. the challenge card
+    // on phones). The surrounding button still receives the click.
+    <div className="perspective w-20 h-20 pointer-events-none">
       <div
         ref={cubeRef}
         className="dice-cube relative w-full h-full"

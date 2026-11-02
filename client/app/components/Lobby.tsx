@@ -1,135 +1,171 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { LENGTH_OPTIONS } from "../constants";
+import GameSettings from "./GameSettings";
+import AccountAuth from "./AccountAuth";
+import CoupleLink from "./CoupleLink";
+import CoupleHome from "./CoupleHome";
 import HowToPlay from "./HowToPlay";
-import type { GameLength, GameMode } from "../types";
+import type { AccountSession, AccountView, AchievementDef, NewGameSettings } from "../types";
 
 type Props = {
   connected: boolean;
   logo: ReactNode;
   errorBanner: ReactNode;
   onError: (message: string) => void;
-  onCreate: (username: string, settings: { mode: GameMode; length: GameLength }) => void;
+  settings: NewGameSettings;
+  onSettingsChange: (s: NewGameSettings) => void;
+  // quick game
+  initialJoinCode: string;
+  onCreate: (username: string) => void;
   onJoin: (username: string, roomCode: string) => void;
+  // account + couple
+  session: AccountSession | null;
+  account: AccountView | null;
+  definitions: AchievementDef[];
+  onLogin: (session: AccountSession, view: AccountView) => void;
+  onLinked: (view: AccountView) => void;
+  onCoupleStart: () => void;
+  onCoupleJoin: (roomId: string) => void;
+  onCoupleLogout: () => void;
 };
 
-const MODES: { value: GameMode; icon: string; label: string; desc: string }[] = [
-  { value: "competitive", icon: "🏆", label: "Competitive", desc: "Highest score wins" },
-  { value: "coop", icon: "💞", label: "Co-op", desc: "Fill the love meter together" },
-];
+export default function Lobby(props: Props) {
+  const { connected, logo, errorBanner, onError, settings, onSettingsChange, initialJoinCode, session, account } = props;
+  const overview = account?.overview ?? null;
 
-export default function Lobby({ connected, logo, errorBanner, onError, onCreate, onJoin }: Props) {
+  // An invite link opens the quick-join form, unless you're logged in as a couple
+  const [tab, setTab] = useState<"couple" | "quick">(initialJoinCode && !session ? "quick" : session ? "couple" : "couple");
   const [username, setUsername] = useState("");
-  const [roomCode, setRoomCode] = useState("");
-  const [mode, setMode] = useState<GameMode>("competitive");
-  const [length, setLength] = useState<GameLength>("10");
-
-  const chooseMode = (value: GameMode) => {
-    setMode(value);
-    // "First to N points" has no end in co-op, so fall back to rounds
-    if (value === "coop" && !LENGTH_OPTIONS.find((o) => o.value === length)?.coop) setLength("10");
-  };
+  const [roomCode, setRoomCode] = useState(initialJoinCode);
+  const [showSettings, setShowSettings] = useState(false);
 
   const create = () => {
     if (!username.trim()) return onError("Please enter your name");
-    onCreate(username, { mode, length });
+    props.onCreate(username);
   };
 
   const join = () => {
     if (!username.trim()) return onError("Please enter your name");
     if (!roomCode.trim()) return onError("Please enter a room code");
-    onJoin(username, roomCode);
+    props.onJoin(username, roomCode);
   };
 
   return (
-    <div className="flex min-h-[85vh] items-center justify-center">
-      <div className="panel w-full max-w-[420px] p-7 space-y-5">
+    <div className="flex min-h-[85vh] items-center justify-center py-6">
+      <div className="panel w-full max-w-[460px] p-6 sm:p-7 space-y-5">
         {logo}
 
-        <p className="text-center text-muted text-sm">
-          Roll the dice, move around the board and take on love, dares, memories and gifts together.
-        </p>
-
-        {errorBanner}
-
-        {/* USERNAME */}
-        <div>
-          <label className="panel-label">Your name</label>
-          <input
-            value={username}
-            maxLength={20}
-            onChange={(e) => setUsername(e.target.value)}
-            className="field w-full mt-1.5 p-3"
-            placeholder="e.g. Alex"
-          />
+        <div className="grid grid-cols-2 gap-1 rounded-xl bg-sunken p-1" role="tablist" aria-label="How to play">
+          {(
+            [
+              ["couple", "💑 Couple"],
+              ["quick", "⚡ Quick game"],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              role="tab"
+              aria-selected={tab === id}
+              onClick={() => setTab(id)}
+              className={`rounded-lg py-2 text-sm font-bold transition-colors ${tab === id ? "bg-surface-2 text-white shadow" : "text-muted hover:text-white"}`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
 
-        {/* NEW GAME SETTINGS */}
-        <div className="rounded-2xl bg-sunken/60 border border-line p-3 space-y-3">
-          <p className="panel-label">New game</p>
+        {tab === "couple" ? (
+          session && account && overview && account.slot !== null ? (
+            <CoupleHome
+              session={session}
+              slot={account.slot}
+              overview={overview}
+              definitions={props.definitions}
+              connected={connected}
+              settings={settings}
+              onSettingsChange={onSettingsChange}
+              onStart={props.onCoupleStart}
+              onJoin={props.onCoupleJoin}
+              onLogout={props.onCoupleLogout}
+              errorBanner={errorBanner}
+            />
+          ) : session && account ? (
+            <>
+              {errorBanner}
+              <CoupleLink session={session} name={account.user.name} connected={connected} onLinked={props.onLinked} onLogout={props.onCoupleLogout} />
+            </>
+          ) : session ? (
+            <p className="py-6 text-center text-sm text-muted">Loading your account…</p>
+          ) : (
+            <>
+              {errorBanner}
+              <AccountAuth connected={connected} onDone={props.onLogin} />
+            </>
+          )
+        ) : (
+          <>
+            <p className="text-center text-muted text-sm">A one-off game with anyone. Nothing is saved after it ends.</p>
 
-          <div className="grid grid-cols-2 gap-2">
-            {MODES.map((m) => (
-              <button
-                key={m.value}
-                onClick={() => chooseMode(m.value)}
-                className={`rounded-xl border p-2.5 text-left transition-colors ${
-                  mode === m.value ? "border-rose bg-rose/15" : "border-line bg-surface hover:border-line-strong"
-                }`}
-              >
-                <div className="text-sm font-bold">
-                  {m.icon} {m.label}
-                </div>
-                <div className="text-[11px] text-muted mt-0.5">{m.desc}</div>
+            {errorBanner}
+
+            <div>
+              <label className="panel-label" htmlFor="quick-name">
+                Your name
+              </label>
+              <input
+                id="quick-name"
+                value={username}
+                maxLength={20}
+                onChange={(e) => setUsername(e.target.value)}
+                className="field w-full mt-1.5 p-3"
+                placeholder="e.g. Alex"
+                autoFocus={Boolean(initialJoinCode)}
+              />
+            </div>
+
+            {/* JOIN (first when arriving from an invite link) */}
+            {initialJoinCode && (
+              <button onClick={join} disabled={!connected} className="btn btn-gold w-full p-3">
+                Join room {roomCode}
               </button>
-            ))}
-          </div>
+            )}
 
-          <div className="flex flex-wrap gap-1.5">
-            {LENGTH_OPTIONS.map((o) => {
-              const disabled = mode === "coop" && !o.coop;
-              return (
-                <button
-                  key={o.value}
-                  onClick={() => setLength(o.value)}
-                  disabled={disabled}
-                  title={disabled ? "Co-op games use rounds" : undefined}
-                  className={`rounded-full border px-3 py-1 text-xs font-semibold transition-colors disabled:opacity-35 disabled:cursor-not-allowed ${
-                    length === o.value ? "border-gold bg-gold/15 text-gold" : "border-line text-muted hover:text-white"
-                  }`}
-                >
-                  {o.label}
-                </button>
-              );
-            })}
-          </div>
+            <div className="rounded-2xl bg-sunken/60 border border-line p-3 space-y-3">
+              <button onClick={() => setShowSettings((v) => !v)} className="flex w-full items-center justify-between" aria-expanded={showSettings}>
+                <span className="panel-label">New game settings</span>
+                <span className="text-xs text-muted">{showSettings ? "Hide ▴" : "Customise ▾"}</span>
+              </button>
+              {showSettings && <GameSettings value={settings} onChange={onSettingsChange} />}
+              <button onClick={create} disabled={!connected} className="btn btn-primary w-full p-3">
+                Create new room
+              </button>
+            </div>
 
-          <button onClick={create} disabled={!connected} className="btn btn-primary w-full p-3">
-            Create new room
-          </button>
-        </div>
-
-        <div className="flex items-center gap-3 text-muted/60 text-xs">
-          <div className="h-px flex-1 bg-line" />
-          or join one
-          <div className="h-px flex-1 bg-line" />
-        </div>
-
-        {/* JOIN ROOM */}
-        <div className="flex gap-2">
-          <input
-            value={roomCode}
-            onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
-            onKeyDown={(e) => e.key === "Enter" && join()}
-            className="field min-w-0 flex-1 p-3 font-mono tracking-[0.3em]"
-            placeholder="CODE"
-            aria-label="Room code"
-          />
-          <button onClick={join} disabled={!connected} className="btn btn-secondary px-5">
-            Join
-          </button>
-        </div>
+            {!initialJoinCode && (
+              <>
+                <div className="flex items-center gap-3 text-muted/60 text-xs">
+                  <div className="h-px flex-1 bg-line" />
+                  or join one
+                  <div className="h-px flex-1 bg-line" />
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    value={roomCode}
+                    onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
+                    onKeyDown={(e) => e.key === "Enter" && join()}
+                    className="field min-w-0 flex-1 p-3 font-mono tracking-[0.3em]"
+                    placeholder="CODE"
+                    aria-label="Room code"
+                  />
+                  <button onClick={join} disabled={!connected} className="btn btn-secondary px-5">
+                    Join
+                  </button>
+                </div>
+              </>
+            )}
+          </>
+        )}
 
         {!connected && <p className="text-center text-xs text-muted">Connecting to server…</p>}
 

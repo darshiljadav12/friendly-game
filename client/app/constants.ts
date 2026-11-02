@@ -1,24 +1,45 @@
-import type { ChallengeType, GameLength, PowerUp, TileType } from "./types";
+import type { A11y, A11yKey, BoardPreset, Challenge, ChallengeType, GameLength, NewGameSettings, PlayableTile, PowerUp, ThemeName, TileType } from "./types";
 
 type ThemeKey = TileType | ChallengeType;
 
 // The board order comes from the server; this only describes how each tile looks
 export const TILE_INFO: Record<ThemeKey, { label: string; sub: string }> = {
-  start: { label: "START", sub: "+5 & a card each lap" },
+  start: { label: "START", sub: "+5 pts, +3 coins & the shop" },
   love: { label: "LOVE", sub: "Partner rates your answer" },
   dare: { label: "DARE", sub: "Do it now or save it" },
   memory: { label: "MEMORY", sub: "Partner rates your answer" },
-  gift: { label: "GIFT", sub: "A sweet gesture" },
+  gift: { label: "GIFT", sub: "A sweet gesture (or save it)" },
   guess: { label: "GUESS", sub: "Can they guess your answer?" },
   wild: { label: "WILD", sub: "Something random happens" },
   timed: { label: "TIMED", sub: "30s: in time = double" },
   together: { label: "TOGETHER", sub: "Land on your partner" },
 };
 
-export const POWER_UP_INFO: Record<PowerUp, { icon: string; name: string; desc: string }> = {
-  freePass: { icon: "🎟️", name: "Free Pass", desc: "Skip this challenge and still get its points" },
-  reroll: { icon: "🎲", name: "Reroll", desc: "Ignore this tile and roll again" },
-  handOff: { icon: "😈", name: "Pass It On", desc: "Your partner has to do this one" },
+// Whether the challenge card is waiting for a tap/answer from this player right now
+export function needsMyAction(c: Challenge | null | undefined, myId: string) {
+  if (!c) return false;
+  const isDoer = c.playerId === myId;
+  if (c.type === "together") return !c.confirmed.includes(myId);
+  switch (c.stage) {
+    case "guessing":
+      return isDoer ? !c.hasAnswer : !c.hasGuess;
+    case "rating":
+      return !isDoer;
+    default: // pending, timing, reveal
+      return isDoer;
+  }
+}
+
+export const PLAYABLE_TILES: PlayableTile[] = ["love", "memory", "dare", "gift", "guess", "timed", "wild"];
+
+// Prices come from the server (meta); these are fallbacks for the first render
+export const POWER_UP_INFO: Record<PowerUp, { icon: string; name: string; desc: string; price: number }> = {
+  freePass: { icon: "🎟️", name: "Free Pass", desc: "Skip this challenge and still get its points", price: 18 },
+  reroll: { icon: "🎲", name: "Reroll", desc: "Ignore this tile and roll again", price: 12 },
+  handOff: { icon: "😈", name: "Pass It On", desc: "Your partner has to do this one", price: 15 },
+  shield: { icon: "🛡️", name: "Shield", desc: "Blocks your partner's Wild swap/steal or Pass It On (automatic)", price: 12 },
+  mirror: { icon: "🔁", name: "Mirror", desc: "Your partner earns the same points you do on this challenge", price: 15 },
+  teleport: { icon: "🎯", name: "Teleport", desc: "Instead of rolling, jump to any tile you pick", price: 22 },
 };
 
 export const REACTIONS = ["😂", "❤️", "😳", "🔥", "😍", "👏"];
@@ -29,6 +50,39 @@ export const LENGTH_OPTIONS: { value: GameLength; label: string; coop: boolean }
   { value: "20", label: "20 rounds", coop: true },
   { value: "points150", label: "First to 150", coop: false },
 ];
+
+export const BOARD_PRESETS: { value: BoardPreset; icon: string; label: string; desc: string }[] = [
+  { value: "classic", icon: "🎲", label: "Classic", desc: "The original balanced board" },
+  { value: "romantic", icon: "💗", label: "Romantic", desc: "More love, memories & gifts" },
+  { value: "daring", icon: "🔥", label: "Daring", desc: "More dares, timers & wilds" },
+  { value: "chill", icon: "🌙", label: "Chill", desc: "No timers, no wild surprises" },
+  { value: "random", icon: "🔀", label: "Random", desc: "Every type equally, shuffled" },
+  { value: "custom", icon: "🎛️", label: "Custom", desc: "Pick your own mix" },
+];
+
+export const THEMES: { value: ThemeName; label: string; swatch: [string, string] }[] = [
+  { value: "warm", label: "Warm Night", swatch: ["#3d1531", "#fb7185"] },
+  { value: "ocean", label: "Ocean", swatch: ["#0b2236", "#38bdf8"] },
+  { value: "forest", label: "Forest", swatch: ["#10251c", "#4ade80"] },
+  { value: "festive", label: "Festive", swatch: ["#3a0d12", "#fbbf24"] },
+];
+
+export const A11Y_OPTIONS: { key: A11yKey; icon: string; label: string; desc: string }[] = [
+  { key: "reduceMotion", icon: "🐢", label: "Reduce motion", desc: "Fewer animations, no floating hearts" },
+  { key: "largeText", icon: "🔠", label: "Larger text", desc: "Everything about 15% bigger" },
+  { key: "highContrast", icon: "🌓", label: "High contrast", desc: "Brighter text and borders" },
+  { key: "colorBlind", icon: "👁️", label: "Colour-blind friendly", desc: "Blue/orange players with shapes" },
+];
+
+export const NO_A11Y: A11y = { reduceMotion: false, largeText: false, highContrast: false, colorBlind: false };
+
+export const DEFAULT_NEW_GAME: NewGameSettings = {
+  mode: "competitive",
+  length: "10",
+  board: { preset: "classic", weights: null },
+  theme: "warm",
+  a11y: NO_A11Y,
+};
 
 export const GRID_SIZE = 8;
 
@@ -85,15 +139,31 @@ export function tileStyle(type: ThemeKey) {
   };
 }
 
-type PlayerTheme = { light: string; base: string; dark: string };
+type PlayerTheme = { light: string; base: string; dark: string; shape: string };
 
 // Rose and gold: the two accents of the theme
-export const PLAYER_THEMES: PlayerTheme[] = [
-  { light: "#fecdd3", base: "#fb7185", dark: "#9f1239" },
-  { light: "#fde68a", base: "#fbbf24", dark: "#92400e" },
+const PLAYER_THEMES: PlayerTheme[] = [
+  { light: "#fecdd3", base: "#fb7185", dark: "#9f1239", shape: "50%" },
+  { light: "#fde68a", base: "#fbbf24", dark: "#92400e", shape: "50%" },
 ];
 
-export const playerTheme = (index: number) => PLAYER_THEMES[index % PLAYER_THEMES.length];
+// Okabe–Ito blue/orange plus different token shapes, so players never rely on colour alone
+const COLOR_BLIND_THEMES: PlayerTheme[] = [
+  { light: "#bfe3ff", base: "#3b9ae1", dark: "#0b4f86", shape: "50%" },
+  { light: "#ffe0b0", base: "#f0a030", dark: "#8a5200", shape: "22%" },
+];
+
+let colorBlind = false;
+
+// Set once per render from the effective accessibility settings
+export function setColorBlindPalette(value: boolean) {
+  colorBlind = value;
+}
+
+export const playerTheme = (index: number) => {
+  const list = colorBlind ? COLOR_BLIND_THEMES : PLAYER_THEMES;
+  return list[index % list.length];
+};
 
 // Glossy marble look for avatars and tokens
 export function sphereStyle(index: number) {
@@ -101,5 +171,6 @@ export function sphereStyle(index: number) {
   return {
     background: `radial-gradient(circle at 32% 28%, ${t.light} 0%, ${t.base} 42%, ${t.dark} 100%)`,
     boxShadow: `inset 0 -3px 6px rgba(0,0,0,0.3), 0 3px 6px rgba(0,0,0,0.45)`,
+    borderRadius: t.shape,
   };
 }

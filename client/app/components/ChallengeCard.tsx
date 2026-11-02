@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type Ref } from "react";
-import { POWER_UP_INFO, TILE_INFO, TILE_THEMES, tileStyle } from "../constants";
+import { POWER_UP_INFO, TILE_INFO, TILE_THEMES, needsMyAction, tileStyle } from "../constants";
 import { sound } from "../../lib/sound";
 import type { Challenge, GameState, PowerUp } from "../types";
 
@@ -22,7 +22,7 @@ type Props = {
   challenge: Challenge;
   myId: string;
   timerEndsAt: number | null;
-  onAction: (action: ChallengeAction, extra?: { hearts?: number; text?: string }) => void;
+  onAction: (action: ChallengeAction, extra?: { hearts?: number; text?: string; note?: string }) => void;
   onUsePowerUp: (card: PowerUp) => void;
 };
 
@@ -95,6 +95,7 @@ export default function ChallengeCard({ ref, game, challenge: c, myId, timerEnds
   const partnerOfDoer = game.players.find((p) => p.id !== c.playerId);
   const isDoer = c.playerId === myId;
   const theme = TILE_THEMES[c.type];
+  const myMove = needsMyAction(c, myId);
 
   const doubled = doer?.doubleNext;
   const pointsLabel =
@@ -106,13 +107,33 @@ export default function ChallengeCard({ ref, game, challenge: c, myId, timerEnds
           ? `+${c.points} each`
           : `+${c.points}`;
 
-  // Cards can be used by whoever landed, before anything has been answered
+  // Cards can be used by whoever landed, before anything has been answered, one per challenge.
+  // Shield works by itself and Teleport replaces a roll, so they're not offered here.
   const canUseCards =
     isDoer &&
     c.ownerId === myId &&
     c.type !== "together" &&
+    !c.cardUsed &&
     (c.stage === "pending" || (c.stage === "guessing" && !c.hasAnswer && !c.hasGuess));
-  const cards = canUseCards ? (me?.powerUps ?? []) : [];
+  const cards = canUseCards ? (me?.powerUps ?? []).filter((card) => card !== "shield" && card !== "teleport") : [];
+  const partnerShielded = partnerOfDoer?.powerUps.includes("shield");
+
+  // Optional memory-book note, only in couple games (that's where the memory book lives)
+  const [note, setNote] = useState("");
+  const done = () => onAction("done", note.trim() ? { note: note.trim() } : undefined);
+  const noteBox = game.isCouple && (
+    <label className="block">
+      <span className="sr-only">Memory book note</span>
+      <textarea
+        value={note}
+        maxLength={200}
+        rows={2}
+        onChange={(e) => setNote(e.target.value)}
+        className="field w-full resize-none px-3 py-2 text-xs"
+        placeholder="📖 Add a note for your memory book (optional)"
+      />
+    </label>
+  );
 
   const title =
     c.type === "together"
@@ -238,15 +259,16 @@ export default function ChallengeCard({ ref, game, challenge: c, myId, timerEnds
           {(c.type === "love" || c.type === "memory") && (
             <p className="text-xs text-muted">Answer out loud, then {partnerOfDoer?.username} rates it.</p>
           )}
+          {noteBox}
           <div className="flex gap-3">
-            <button onClick={() => onAction("done")} className="btn btn-primary flex-1 py-2.5">
+            <button onClick={done} className="btn btn-primary flex-1 py-2.5">
               Done
             </button>
             <button onClick={() => onAction("skip")} className="btn btn-secondary flex-1 py-2.5">
               Skip
             </button>
           </div>
-          {c.type === "dare" && (
+          {(c.type === "dare" || c.type === "gift") && (
             <button onClick={() => onAction("save")} className="btn btn-gold w-full py-2.5">
               ⏳ Save for later
             </button>
@@ -258,13 +280,19 @@ export default function ChallengeCard({ ref, game, challenge: c, myId, timerEnds
   }
 
   return (
-    <section ref={ref} className="panel overflow-hidden">
+    <section ref={ref} className={`panel overflow-hidden ${myMove ? "action-needed" : ""}`}>
       {/* tile-coloured header */}
       <div className="flex items-center justify-between px-4 py-2.5" style={{ background: tileStyle(c.type).background }}>
         <span className="text-xs font-black uppercase tracking-widest">
           {theme.icon} {TILE_INFO[c.type].label}
         </span>
         <span className="flex items-center gap-1.5">
+          {myMove && <span className="action-badge rounded-full bg-white px-2 py-0.5 text-[10px] font-black text-[#451a03]">👉 Your move</span>}
+          {c.mirror && (
+            <span className="rounded-full bg-black/30 px-2 py-0.5 text-[10px] font-black" title={`${partnerOfDoer?.username} earns the same points`}>
+              🔁 Mirror
+            </span>
+          )}
           {doubled && <span className="rounded-full bg-gold px-2 py-0.5 text-[10px] font-black text-[#451a03]">2×</span>}
           <span className="rounded-full bg-black/25 px-2 py-0.5 text-xs font-bold text-gold">{pointsLabel}</span>
         </span>
@@ -279,11 +307,14 @@ export default function ChallengeCard({ ref, game, challenge: c, myId, timerEnds
         {/* POWER-UP CARDS */}
         {cards.length > 0 && (
           <div className="mt-4 border-t border-line pt-3">
-            <p className="panel-label mb-2">Play a card</p>
+            <p className="panel-label mb-2">Play a card (one per challenge)</p>
+            {partnerShielded && (
+              <p className="mb-2 text-[11px] text-muted">🛡️ {partnerOfDoer?.username} has a Shield: Pass It On will be blocked.</p>
+            )}
             <div className="flex flex-wrap gap-2">
               {cards.map((card, i) => {
                 const info = POWER_UP_INFO[card];
-                const blocked = card === "handOff" && c.type === "guess";
+                const blocked = (card === "handOff" || card === "mirror") && c.type === "guess";
                 return (
                   <button
                     key={`${card}-${i}`}
