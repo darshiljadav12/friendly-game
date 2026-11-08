@@ -36,6 +36,54 @@ const LENGTH_OPTIONS = {
 
 const REACTIONS = ["😂", "❤️", "😳", "🔥", "😍", "👏"];
 
+// Board piece avatars, grouped into tabs in the picker. The first two (🐻, 🐰) are the
+// defaults for the first and second player. Stick to emoji that render on older phones.
+const AVATAR_GROUPS = [
+  {
+    id: "animals",
+    name: "Animals",
+    icon: "🐻",
+    avatars: ["🐻", "🐰", "🦊", "🐱", "🐼", "🐨", "🦁", "🐯", "🐸", "🐧", "🦄", "🐶", "🐹", "🐵", "🐙", "🦋",
+      "🐮", "🐷", "🐤", "🦉", "🐢", "🐬", "🐳", "🦈", "🦒", "🦓", "🐘", "🦥", "🦦", "🦔", "🐝", "🐞", "🐌", "🦩", "🦜", "🐿️"],
+  },
+  {
+    id: "faces",
+    name: "Faces",
+    icon: "😎",
+    avatars: ["😀", "😎", "🥰", "😍", "😘", "😜", "🤪", "🤓", "🥳", "😇", "😈", "🤠", "🥸", "🤩", "😴", "🤗",
+      "🙃", "😏", "🤭", "😺", "😻", "👻", "🤖", "👽", "💀", "🤡", "🎃", "💩"],
+  },
+  {
+    id: "fantasy",
+    name: "Fantasy",
+    icon: "🧚",
+    avatars: ["🧚", "🧜", "🧛", "🧞", "🧙", "🦸", "🦹", "🥷", "👸", "🤴", "🧑‍🚀", "🧑‍🍳", "👑", "🐉", "🦖", "🦕",
+      "🧝", "🪄"],
+  },
+  {
+    id: "food",
+    name: "Food",
+    icon: "🍓",
+    avatars: ["🍓", "🍒", "🍑", "🍉", "🍍", "🥑", "🍕", "🍔", "🌮", "🍩", "🍪", "🧁", "🍦", "🍫", "🍿", "🥐",
+      "🍣", "🧋", "☕", "🍷", "🥂", "🍯"],
+  },
+  {
+    id: "love",
+    name: "Love",
+    icon: "💖",
+    avatars: ["❤️", "💖", "💘", "💝", "💋", "💍", "🌹", "💐", "🌷", "🌸", "🌻", "🌈", "⭐", "🌙", "☀️", "🔥",
+      "✨", "💎", "🎀", "🍀"],
+  },
+  {
+    id: "fun",
+    name: "Fun",
+    icon: "🎮",
+    avatars: ["🎮", "🎸", "🎧", "🎨", "⚽", "🏀", "🎯", "🎲", "🚀", "🛸", "🪐", "🏝️", "🎈", "🎁", "🧸", "🎳", "🏄", "🚲", "📸"],
+  },
+];
+const AVATARS = AVATAR_GROUPS.flatMap((g) => g.avatars);
+if (new Set(AVATARS).size !== AVATARS.length) throw new Error("config: duplicate avatar in AVATAR_GROUPS");
+
 const POWER_UPS = {
   freePass: { name: "Free Pass", icon: "🎟️", price: 18 },
   reroll: { name: "Reroll", icon: "🎲", price: 12 },
@@ -54,7 +102,24 @@ const POINTS = {
   timed: 15, // doubled when finished in time
   guess: 15, // to both players on a match
   together: 10, // to both players
+  play: 10, // mini-game: Draw It (to both on a correct guess) and Free Pass
 };
+
+// 🎮 PLAY tile: a random mini-game (never the same one twice in a row)
+const MINI_GAMES = {
+  thisOrThat: { title: "This or That", icon: "⚖️" },
+  neverEver: { title: "Never Have I Ever", icon: "🙊" },
+  mostLikely: { title: "Who's More Likely", icon: "👉" },
+  finish: { title: "Finish My Sentence", icon: "✍️" },
+  draw: { title: "Draw It", icon: "🎨" },
+};
+const MINI_ROUNDS = 3; // prompts per pick game
+const MINI_MATCH_POINTS = 5; // each, per matching pick
+const MINI_ALL_MATCH_BONUS = 5; // each, when all picks match
+const DRAW_MS = 60_000;
+const MAX_DRAW_GUESSES = 12;
+const MAX_STROKES = 400;
+const MAX_STROKE_POINTS = 300;
 
 // Challenges that can be put off with "Save for later" (a gift can't always be given mid-game)
 const SAVABLE_TYPES = new Set(["dare", "gift"]);
@@ -62,18 +127,18 @@ const SAVABLE_TYPES = new Set(["dare", "gift"]);
 // The partner rates these with 1–3 hearts instead of a fixed score
 const RATED_TYPES = new Set(["love", "memory"]);
 
-const TILE_TYPES = ["love", "memory", "dare", "gift", "guess", "timed", "wild"];
+const TILE_TYPES = ["love", "memory", "dare", "gift", "guess", "timed", "play", "wild"];
 
 // The original hand-tuned layout
-const CLASSIC_PATTERN = ["love", "dare", "guess", "memory", "wild", "gift", "dare", "timed", "love"];
+const CLASSIC_PATTERN = ["love", "dare", "guess", "memory", "wild", "gift", "dare", "timed", "play"];
 
 // Relative weights per tile type; the board is filled in these proportions
 const BOARD_PRESETS = {
   classic: null, // uses CLASSIC_PATTERN
-  romantic: { love: 4, memory: 4, gift: 3, guess: 2, dare: 1, timed: 1, wild: 1 },
-  daring: { dare: 4, timed: 3, wild: 2, love: 1, memory: 1, gift: 1, guess: 1 },
-  chill: { love: 3, memory: 3, gift: 3, guess: 3, dare: 1, timed: 0, wild: 0 },
-  random: { love: 1, memory: 1, dare: 1, gift: 1, guess: 1, timed: 1, wild: 1 },
+  romantic: { love: 4, memory: 4, gift: 3, guess: 2, play: 2, dare: 1, timed: 1, wild: 1 },
+  daring: { dare: 4, timed: 3, wild: 2, play: 2, love: 1, memory: 1, gift: 1, guess: 1 },
+  chill: { love: 3, memory: 3, gift: 3, guess: 3, play: 3, dare: 1, timed: 0, wild: 0 },
+  random: { love: 1, memory: 1, dare: 1, gift: 1, guess: 1, timed: 1, play: 1, wild: 1 },
   custom: null, // weights come from the creator
 };
 const MAX_TILE_WEIGHT = 5;
@@ -104,8 +169,18 @@ module.exports = {
   COINS_PER_LAP,
   LENGTH_OPTIONS,
   REACTIONS,
+  AVATARS,
+  AVATAR_GROUPS,
   POWER_UPS,
   POINTS,
+  MINI_GAMES,
+  MINI_ROUNDS,
+  MINI_MATCH_POINTS,
+  MINI_ALL_MATCH_BONUS,
+  DRAW_MS,
+  MAX_DRAW_GUESSES,
+  MAX_STROKES,
+  MAX_STROKE_POINTS,
   RATED_TYPES,
   SAVABLE_TYPES,
   TILE_TYPES,

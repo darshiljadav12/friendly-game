@@ -50,6 +50,7 @@ function emptySlotStats() {
     sixes: 0,
     laps: 0,
     notes: 0,
+    minigames: 0,
     byType: {},
   };
 }
@@ -79,7 +80,7 @@ function overview(couple) {
 // Everything the client needs after signing up / logging in / reopening the app
 function accountView(user, couple) {
   return {
-    user: { username: user.username, name: user.name },
+    user: { username: user.username, name: user.name, avatar: user.avatar ?? null },
     slot: couple ? user.slot : null,
     overview: couple ? overview(couple) : null,
   };
@@ -187,6 +188,16 @@ async function logoutOthers(session) {
   await db.saveUser(auth.user);
 }
 
+// Remembers the board avatar picked in a couple game for that member's next games
+async function saveAvatar(code, slot, avatar) {
+  const couple = await db.getCouple(code);
+  const member = couple?.members.find((m) => m.slot === slot);
+  const user = member && (await db.getUser(member.username));
+  if (!user) return;
+  user.avatar = avatar;
+  await db.saveUser(user);
+}
+
 /* =========================
    COUPLE LINKING
 ========================= */
@@ -272,12 +283,14 @@ async function completeIou(code, slot, iouId) {
   return { dare, unlocked, couple };
 }
 
+const STAT_KEYS = emptySlotStats();
+
 function mergeTally(stats, tally) {
   for (const [key, value] of Object.entries(tally)) {
     if (key === "byType") {
       for (const [type, n] of Object.entries(value)) stats.byType[type] = (stats.byType[type] || 0) + n;
-    } else if (typeof value === "number" && key in stats) {
-      stats[key] += value;
+    } else if (typeof value === "number" && key in STAT_KEYS) {
+      stats[key] = (stats[key] || 0) + value; // older couples may not have newer counters yet
     }
   }
 }
@@ -365,6 +378,7 @@ module.exports = {
   authenticate,
   logout,
   logoutOthers,
+  saveAvatar,
   accountView,
   overview,
   createCouple,

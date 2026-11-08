@@ -8,7 +8,7 @@ const MODES: { value: GameMode; icon: string; label: string; desc: string }[] = 
   { value: "coop", icon: "💞", label: "Co-op", desc: "Fill the love meter together" },
 ];
 
-const DEFAULT_WEIGHTS: Record<PlayableTile, number> = { love: 2, memory: 2, dare: 2, gift: 1, guess: 1, timed: 1, wild: 1 };
+const DEFAULT_WEIGHTS: Record<PlayableTile, number> = { love: 2, memory: 2, dare: 2, gift: 1, guess: 1, timed: 1, play: 1, wild: 1 };
 
 const chip = (active: boolean) =>
   `rounded-full border px-3 py-1 text-xs font-semibold transition-colors disabled:opacity-35 disabled:cursor-not-allowed ${

@@ -1,7 +1,8 @@
 "use client";
 
 import ResultCard from "./ResultCard";
-import { playerTheme, sphereStyle } from "../constants";
+import { AvatarBubble } from "./Avatar";
+import { playerTheme } from "../constants";
 import type { AchievementDef, GameState } from "../types";
 
 type Props = {
@@ -31,7 +32,7 @@ export default function GameOver({ game, myId, definitions, colorIndex, onPlayAg
 
   return (
     // Full screen on phones (the board is too small to hold it), over the board on desktop
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 lg:absolute lg:z-20 lg:rounded-2xl lg:p-0">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 pt-[calc(env(safe-area-inset-top)+1rem)] pb-[calc(env(safe-area-inset-bottom)+1rem)] lg:absolute lg:z-20 lg:rounded-2xl lg:p-0">
       <div className="panel w-full max-w-[380px] lg:w-[min(360px,92%)] max-h-full lg:max-h-[94%] overflow-y-auto p-5 text-center space-y-4" style={{ background: "var(--surface)" }}>
         <div className="text-5xl animate-bounce" aria-hidden>
           {isCoop ? (game.coopWon ? "💞" : "🥺") : game.winnerIds.length > 1 ? "💞" : "🏆"}
@@ -50,7 +51,7 @@ export default function GameOver({ game, myId, definitions, colorIndex, onPlayAg
             .map((p) => (
               <div key={p.id} className="flex items-center justify-between rounded-xl bg-sunken px-3 py-2">
                 <span className="flex items-center gap-2">
-                  <span className="w-4 h-4" style={sphereStyle(colorIndex(p.id))} />
+                  <AvatarBubble avatar={p.avatar} colorIndex={colorIndex(p.id)} className="h-7 w-7 text-base" />
                   {p.username}
                 </span>
                 <span className="font-black" style={{ color: playerTheme(colorIndex(p.id)).base }}>

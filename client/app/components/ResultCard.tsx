@@ -109,7 +109,7 @@ function drawCard(game: GameState, definitions: AchievementDef[], colorIndex: (i
 
     ctx.fillStyle = t.base;
     ctx.font = font(800, 44);
-    ctx.fillText(p.username, x + cardW / 2, y + 75);
+    ctx.fillText(`${p.avatar ?? ""} ${p.username}`.trim(), x + cardW / 2, y + 75);
     ctx.font = font(900, 120);
     ctx.fillText(String(p.score), x + cardW / 2, y + 205);
     ctx.font = font(500, 26);

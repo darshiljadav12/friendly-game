@@ -41,6 +41,25 @@ export const a11yPrefs = {
   },
 };
 
+// Last avatar picked on this device, asked for again in the next quick game
+const AVATAR_KEY = "friendly-game:avatar";
+export const avatarPref = {
+  get(): string | undefined {
+    try {
+      return localStorage.getItem(AVATAR_KEY) ?? undefined;
+    } catch {
+      return undefined;
+    }
+  },
+  set(avatar: string) {
+    try {
+      localStorage.setItem(AVATAR_KEY, avatar);
+    } catch {
+      // ignore
+    }
+  },
+};
+
 // Room setting, overridden by this player's own choice when they made one
 export function effectiveA11y(room: A11y | undefined, local: Partial<A11y>): A11y {
   const base = room ?? { reduceMotion: false, largeText: false, highContrast: false, colorBlind: false };

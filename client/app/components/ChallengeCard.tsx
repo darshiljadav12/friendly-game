@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState, type Ref } from "react";
-import { POWER_UP_INFO, TILE_INFO, TILE_THEMES, needsMyAction, tileStyle } from "../constants";
+import MiniGame from "./MiniGame";
+import { MINI_GAME_INFO, POWER_UP_INFO, TILE_INFO, TILE_THEMES, needsMyAction, tileStyle } from "../constants";
 import { sound } from "../../lib/sound";
 import type { Challenge, GameState, PowerUp } from "../types";
 
@@ -14,7 +15,11 @@ export type ChallengeAction =
   | "answer"
   | "guess"
   | "match"
-  | "nomatch";
+  | "nomatch"
+  | "start"
+  | "pick"
+  | "continue"
+  | "timeup";
 
 type Props = {
   ref?: Ref<HTMLElement>;
@@ -22,7 +27,7 @@ type Props = {
   challenge: Challenge;
   myId: string;
   timerEndsAt: number | null;
-  onAction: (action: ChallengeAction, extra?: { hearts?: number; text?: string; note?: string }) => void;
+  onAction: (action: ChallengeAction, extra?: { hearts?: number; text?: string; note?: string; picks?: number[] }) => void;
   onUsePowerUp: (card: PowerUp) => void;
 };
 
@@ -98,8 +103,9 @@ export default function ChallengeCard({ ref, game, challenge: c, myId, timerEnds
   const myMove = needsMyAction(c, myId);
 
   const doubled = doer?.doubleNext;
-  const pointsLabel =
-    c.type === "love" || c.type === "memory"
+  const pointsLabel = c.mini
+    ? MINI_GAME_INFO[c.mini.game].points
+    : c.type === "love" || c.type === "memory"
       ? "1–3 ❤️"
       : c.type === "timed"
         ? `+${c.points} / ${c.points * 2}`
@@ -116,6 +122,12 @@ export default function ChallengeCard({ ref, game, challenge: c, myId, timerEnds
     !c.cardUsed &&
     (c.stage === "pending" || (c.stage === "guessing" && !c.hasAnswer && !c.hasGuess));
   const cards = canUseCards ? (me?.powerUps ?? []).filter((card) => card !== "shield" && card !== "teleport") : [];
+  // In mini-games you both play (all but Finish My Sentence) these make no sense
+  const bothPlay = Boolean(c.mini && c.mini.game !== "finish");
+  const blockedCard = (card: PowerUp) =>
+    ((card === "handOff" || card === "mirror") && c.type === "guess") ||
+    (bothPlay && card === "mirror") ||
+    (bothPlay && c.mini?.game !== "draw" && card === "handOff");
   const partnerShielded = partnerOfDoer?.powerUps.includes("shield");
 
   // Optional memory-book note, only in couple games (that's where the memory book lives)
@@ -144,7 +156,9 @@ export default function ChallengeCard({ ref, game, challenge: c, myId, timerEnds
 
   let body: React.ReactNode = null;
 
-  if (c.type === "together") {
+  if (c.mini && c.stage !== "rating") {
+    body = <MiniGame game={game} challenge={c} myId={myId} timerEndsAt={timerEndsAt} onAction={onAction} />;
+  } else if (c.type === "together") {
     const iConfirmed = c.confirmed.includes(myId);
     body = iConfirmed ? (
       <Waiting>Waiting for your partner to tap Done…</Waiting>
@@ -209,10 +223,19 @@ export default function ChallengeCard({ ref, game, challenge: c, myId, timerEnds
       </>
     );
   } else if (c.stage === "rating") {
+    const finished = c.mini?.prompt && (
+      <p className="mt-3 rounded-xl bg-sunken p-3 text-sm italic">
+        “{c.mini.prompt.replace(/…/g, "").trim()} <b className="not-italic text-gold">{c.answer}</b>”
+      </p>
+    );
     body = isDoer ? (
-      <Waiting>Waiting for {partnerOfDoer?.username} to rate your answer…</Waiting>
+      <>
+        {finished}
+        <Waiting>Waiting for {partnerOfDoer?.username} to rate your answer…</Waiting>
+      </>
     ) : (
       <>
+        {finished}
         <p className="mt-4 text-sm font-semibold">How was {doer?.username}&apos;s answer?</p>
         <div className="mt-3 grid grid-cols-3 gap-2">
           {[1, 2, 3].map((hearts) => (
@@ -314,13 +337,13 @@ export default function ChallengeCard({ ref, game, challenge: c, myId, timerEnds
             <div className="flex flex-wrap gap-2">
               {cards.map((card, i) => {
                 const info = POWER_UP_INFO[card];
-                const blocked = (card === "handOff" || card === "mirror") && c.type === "guess";
+                const blocked = blockedCard(card);
                 return (
                   <button
                     key={`${card}-${i}`}
                     onClick={() => onUsePowerUp(card)}
                     disabled={blocked}
-                    title={blocked ? "Doesn't work on guess questions" : info.desc}
+                    title={blocked ? "Doesn't work on this challenge" : info.desc}
                     className="btn btn-secondary flex items-center gap-1.5 px-3 py-1.5 text-xs"
                   >
                     <span>{info.icon}</span>

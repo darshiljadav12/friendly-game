@@ -172,6 +172,13 @@ const SECTIONS: Section[] = [
           <li>Tap <b>▶ Start 30s timer</b>; it counts down on both screens. Done within 30 s (1 s grace for lag) = <b>30</b>; later = <b>15</b>.</li>
           <li>Skip gives 0. Timed challenges can&apos;t be saved for later.</li>
         </TileRow>
+        <TileRow type="play" name="Play" points="mini-game">
+          <li>A random mini-game (never the same one twice in a row). The player who landed taps <b>▶ Let&apos;s play</b> or <b>Skip</b>.</li>
+          <li><b>⚖️ This or That</b>, <b>🙊 Never Have I Ever</b>, <b>👉 Who&apos;s More Likely</b>: 3 prompts. You <b>both</b> pick in secret, then all picks are shown. Each match gives <b>both</b> of you +5, all 3 matching is +20 each.</li>
+          <li><b>✍️ Finish My Sentence</b>: you type the end of a sweet sentence, your partner rates it with 1–3 hearts (5 / 10 / 15). It goes to the memory book.</li>
+          <li><b>🎨 Draw It</b>: you get a secret word and draw it in <b>60 s</b>; your partner sees it live and can guess as often as they like (small typos like &quot;cats&quot; for &quot;cat&quot; count). Right guess = <b>+10 each</b>; time up or <b>Give up</b> = 0.</li>
+          <li>After the results, the player who landed taps <b>Continue</b> to end the turn.</li>
+        </TileRow>
         <TileRow type="wild" name="Wild" points="random">
           <li>One random effect straight away, no challenge to do:</li>
           <li><b>Swap</b> places with your partner (neither gets the new tile&apos;s challenge).</li>
@@ -269,6 +276,7 @@ const SECTIONS: Section[] = [
           <li>Free Pass, Reroll, Pass It On and Mirror: only on <b>your own</b> challenge (the one you landed on), before you&apos;ve done anything with it, from <b>Play a card</b> on the challenge card.</li>
           <li><b>One card per challenge.</b> Not on Together, not after starting a timer, not while waiting for a rating, not on a Guess once either answer is typed.</li>
           <li>Teleport replaces a roll; Shield is automatic.</li>
+          <li>🎮 Play tile: cards only before you tap <b>Let&apos;s play</b>. Free Pass gives 10. Mirror only works on Finish My Sentence; Pass It On on Finish My Sentence and Draw It (your partner does it).</li>
         </List>
       </>
     ),
@@ -350,6 +358,7 @@ const SECTIONS: Section[] = [
             ["🎲 Lucky Sixes", "Roll three 6s in a game"],
             ["🌍 Globetrotter", "Pass START 3 times in a game"],
             ["🛍️ Big Spender", "Spend 20 coins in a game"],
+            ["🎮 Game Night", "Play 3 mini-games in a game"],
             ["📅 Regulars", "Play 10 games together"],
             ["📅 Promise Keeper", "Complete 5 IOU dares or gifts"],
             ["📅 Soulmates", "20 guess matches in total"],
@@ -397,12 +406,18 @@ const SECTIONS: Section[] = [
           <li>Only the <b>room creator</b> sees the 🎨 button in the game header and can change the theme (and the room&apos;s accessibility) at any time; both screens update. If the creator leaves for good, the other player takes over.</li>
         </List>
 
+        <H>🐻 Your piece</H>
+        <List>
+          <li>Your piece on the board is an emoji avatar in your colour. You start as 🐻 or 🐰; tap <b>your avatar on the scoreboard</b> (the ✏️ one) to pick another from over 140 animals, faces, fantasy characters, foods, love symbols and fun things, or hit 🎲 Surprise me for a random one.</li>
+          <li>You can&apos;t take the one your partner has. Your pick is remembered: on this device for quick games, and on your account in couple games.</li>
+        </List>
+
         <H>♿ Accessibility</H>
         <List>
           <li>The creator can turn on <b>Reduce motion</b>, <b>Larger text</b>, <b>High contrast</b> and <b>Colour-blind friendly</b> for the room.</li>
           <li>Each player can change any of them <b>just for themselves</b> with the ♿ button in the game header (remembered on that device; &quot;reset&quot; goes back to the room&apos;s setting).</li>
           <li>Reduce motion also turns on automatically if your device asks for less motion. It hides the floating hearts and emoji reactions (their sound still plays).</li>
-          <li>Colour-blind mode uses blue and orange players, and the second player&apos;s token is a rounded square instead of a circle.</li>
+          <li>Colour-blind mode uses blue and orange players, and the second player&apos;s avatar bubble is a rounded square instead of a circle.</li>
           <li>Everything works with a keyboard (visible focus ring), and the board and scores have screen-reader labels.</li>
         </List>
       </>

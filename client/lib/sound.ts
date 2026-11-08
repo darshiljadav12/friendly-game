@@ -4,6 +4,7 @@ const MUTE_KEY = "friendly-game:muted";
 
 let ctx: AudioContext | null = null;
 let muted = false;
+let stale = false; // the page was in the background; replace the audio context on the next tap
 const listeners = new Set<() => void>();
 
 if (typeof window !== "undefined") {
@@ -25,8 +26,17 @@ if (typeof window !== "undefined") {
   // count (not pointerdown), and phones suspend the audio again after the app was in the
   // background, so resume on every gesture, not just the first.
   const unlock = () => {
+    // Back from another app: iPhones often leave the old audio context "running" but silent,
+    // so start a fresh one inside this tap
+    if (stale && ctx) {
+      ctx.close().catch(() => {});
+      ctx = null;
+    }
+    const fresh = stale || !ctx;
+    stale = false;
+
     const audio = getContext();
-    if (!audio || audio.state === "running") return;
+    if (!audio || (audio.state === "running" && !fresh)) return;
     audio.resume().catch(() => {});
     // iOS only really starts the context once something plays inside the gesture
     const src = audio.createBufferSource();
@@ -35,6 +45,19 @@ if (typeof window !== "undefined") {
     src.start(0);
   };
   for (const type of ["touchend", "click", "keydown"]) window.addEventListener(type, unlock, { passive: true });
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") {
+      stale = true;
+    } else {
+      // Android allows resuming without a new tap, so sounds work right away again
+      ctx?.resume().catch(() => {});
+    }
+  });
+  // Coming back through the back/forward cache
+  window.addEventListener("pageshow", (e) => {
+    if (e.persisted) stale = true;
+  });
 }
 
 function getContext() {

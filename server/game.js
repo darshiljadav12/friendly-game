@@ -2,6 +2,7 @@
 
 const C = require("./config");
 const QUESTIONS = require("./questions");
+const MINI = require("./minigames");
 const { gameAchievements } = require("./achievements");
 
 const TILE_LABEL = {
@@ -12,6 +13,7 @@ const TILE_LABEL = {
   gift: "🎁 Gift",
   guess: "🤔 Guess",
   timed: "⏱️ Timed",
+  play: "🎮 Play",
   wild: "⚡ Wild",
   together: "💑 Together",
 };
@@ -134,6 +136,7 @@ function emptyTally() {
     sixes: 0,
     laps: 0,
     notes: 0,
+    minigames: 0,
   };
 }
 
@@ -165,11 +168,12 @@ function createRoom(roomId, settings, coupleCode = null) {
   };
 }
 
-function createPlayer(playerId, username, socketId, slot = null) {
+function createPlayer(playerId, username, socketId, slot = null, avatar = null) {
   return {
     id: playerId,
     socketId,
     username,
+    avatar, // board piece emoji, see pickAvatar
     slot, // 0 or 1 when playing as a couple
     connected: true,
     position: 0,
@@ -236,18 +240,36 @@ function normalizeRoom(room) {
   merged.board = room.board ?? fresh.board;
   merged.creatorId = room.creatorId ?? room.players[0]?.id ?? null;
   merged.players = room.players.map((p) => ({ ...createPlayer(p.id, p.username, null, p.slot ?? null), ...p }));
+  for (const p of merged.players) if (!p.avatar) p.avatar = pickAvatar(merged, null, p); // rooms saved before avatars
   return merged;
 }
 
 // Draw without repeats until the deck runs out, then reshuffle
-function drawQuestion(room, type) {
-  const list = QUESTIONS[type];
-  if (!list) return null;
-
-  if (!room.decks[type] || room.decks[type].length === 0) {
-    room.decks[type] = shuffle(list);
+function drawFrom(room, key, list) {
+  if (!room.decks[key] || room.decks[key].length === 0) {
+    room.decks[key] = shuffle(list);
   }
-  return room.decks[type].pop();
+  return room.decks[key].pop();
+}
+
+function drawQuestion(room, type) {
+  return QUESTIONS[type] ? drawFrom(room, type, QUESTIONS[type]) : null;
+}
+
+// The wanted avatar if it's valid and free, otherwise the first free one (🐻, then 🐰, …)
+function pickAvatar(room, wanted, player = null) {
+  const taken = new Set(room.players.filter((p) => p !== player).map((p) => p.avatar));
+  if (C.AVATARS.includes(wanted) && !taken.has(wanted)) return wanted;
+  return C.AVATARS.find((a) => !taken.has(a));
+}
+
+// Returns an error message, or null when changed
+function setAvatar(room, player, avatar) {
+  if (!C.AVATARS.includes(avatar)) return "Pick one of the avatars";
+  const other = room.players.find((p) => p !== player && p.avatar === avatar);
+  if (other) return `${other.username} already has ${avatar}`;
+  player.avatar = avatar;
+  return null;
 }
 
 /* =========================
@@ -283,10 +305,19 @@ function addMoment(room, moment) {
    STATE FOR CLIENTS
 ========================= */
 
+// 🎮 PLAY: a random mini-game, never the same one twice in a row
+function pickMiniGame(room) {
+  const options = Object.keys(C.MINI_GAMES).filter((g) => g !== room.lastMiniGame);
+  room.lastMiniGame = pick(options);
+  return room.lastMiniGame;
+}
+
 function makeChallenge(room, type, player) {
+  const mini = type === "play" ? { game: pickMiniGame(room), prompt: null, items: null, picks: {}, word: null, strokes: [], guesses: [], result: null } : null;
   return {
     type,
-    question: drawQuestion(room, type),
+    question: mini ? `${C.MINI_GAMES[mini.game].icon} ${C.MINI_GAMES[mini.game].title}` : drawQuestion(room, type),
+    mini,
     points: C.POINTS[type] || 0,
     ownerId: player.id, // who landed on it
     playerId: player.id, // who has to do it (changes with Pass It On)
@@ -319,9 +350,26 @@ function publicChallenge(c) {
     remainingMs: c.endsAt ? Math.max(0, c.endsAt - Date.now()) : null,
     hasAnswer: c.answer !== null,
     hasGuess: c.guess !== null,
-    answer: revealed ? c.answer : null,
+    answer: revealed || c.mini ? c.answer : null, // Finish My Sentence: shown for the rating
     guess: revealed ? c.guess : null,
     confirmed: Object.keys(c.confirmed),
+    mini: c.mini && publicMini(c),
+  };
+}
+
+// Secret picks and the Draw It word stay hidden until the results
+function publicMini(c) {
+  const m = c.mini;
+  const results = c.stage === "results";
+  return {
+    game: m.game,
+    prompt: m.prompt,
+    items: m.items,
+    picked: Object.keys(m.picks),
+    picks: results ? m.picks : null,
+    guesses: m.guesses,
+    word: results ? m.word : null,
+    result: m.result,
   };
 }
 
@@ -345,6 +393,7 @@ function publicState(room) {
     players: room.players.map((p) => ({
       id: p.id,
       username: p.username,
+      avatar: p.avatar,
       slot: p.slot,
       connected: p.connected,
       position: p.position,
@@ -558,7 +607,7 @@ function noteFrom(text) {
 }
 
 // Returns an error message, or null when the action was applied
-function challengeAction(room, player, { action, hearts, text, note } = {}) {
+function challengeAction(room, player, { action, hearts, text, note, picks } = {}) {
   const c = room.challenge;
   if (!c || room.phase !== "playing") return "";
 
@@ -587,6 +636,9 @@ function challengeAction(room, player, { action, hearts, text, note } = {}) {
     }
     return null;
   }
+
+  // Mini-games have their own steps; Finish My Sentence reuses the normal heart rating
+  if (c.type === "play" && c.stage !== "rating") return miniGameAction(room, player, c, { action, text, picks });
 
   switch (c.stage) {
     case "guessing": {
@@ -640,6 +692,7 @@ function challengeAction(room, player, { action, hearts, text, note } = {}) {
       if (!(count >= 1 && count <= 3)) return "";
 
       countDone(doer, c.type);
+      if (c.mini) doer.tally.minigames = (doer.tally.minigames || 0) + 1;
       doer.tally.heartsReceived += count;
       doer.tally.ratingsReceived += 1;
       if (count === 3) doer.tally.threeHearts += 1;
@@ -711,6 +764,205 @@ function challengeAction(room, player, { action, hearts, text, note } = {}) {
 }
 
 /* =========================
+   MINI-GAMES (🎮 PLAY tile)
+========================= */
+
+const normalizeWord = (text) =>
+  String(text)
+    .toLowerCase()
+    .replace(/[^a-z ]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+// "cats", "a cat" or "icecream" all count
+function guessMatches(guess, word) {
+  const g = normalizeWord(guess).replace(/^(a|an|the) /, "");
+  const w = normalizeWord(word);
+  return g === w || g === `${w}s` || g === `${w}es` || g.replace(/ /g, "") === w.replace(/ /g, "");
+}
+
+function startMiniGame(room, c, doer, partner) {
+  const m = c.mini;
+  if (m.game === "finish") {
+    m.prompt = drawFrom(room, "mini:finish", MINI.finish);
+    c.stage = "writing";
+  } else if (m.game === "draw") {
+    m.word = drawFrom(room, "mini:draw", MINI.draw);
+    m.strokes = [];
+    c.stage = "drawing";
+    c.endsAt = Date.now() + C.DRAW_MS;
+  } else {
+    m.items = Array.from({ length: C.MINI_ROUNDS }, () => {
+      if (m.game === "thisOrThat") {
+        const [a, b] = drawFrom(room, "mini:thisOrThat", MINI.thisOrThat);
+        return { text: "", options: [a, b] };
+      }
+      if (m.game === "neverEver") {
+        return { text: `Never have I ever ${drawFrom(room, "mini:neverEver", MINI.neverEver)}`, options: ["🙋 I have", "🙅 Never"] };
+      }
+      return { text: `Who's more likely to ${drawFrom(room, "mini:mostLikely", MINI.mostLikely)}?`, options: [doer.username, partner?.username ?? "You"] };
+    });
+    m.picks = {};
+    c.stage = "picking";
+  }
+  addLog(room, doer.id, "🎮", `${doer.username} started ${c.question}`);
+}
+
+function countMiniGame(player, scored) {
+  if (scored) countDone(player, "play");
+  player.tally.minigames = (player.tally.minigames || 0) + 1;
+}
+
+function finishPicks(room, c, doer, partner) {
+  const m = c.mini;
+  const [a, b] = [doer, partner].map((p) => m.picks[p.id]);
+  const matches = m.items.filter((_, i) => a[i] === b[i]).length;
+  const each = matches * C.MINI_MATCH_POINTS + (matches === m.items.length ? C.MINI_ALL_MATCH_BONUS : 0);
+
+  const points = {};
+  for (const p of room.players) {
+    countMiniGame(p, true);
+    points[p.id] = each > 0 ? award(p, each) : 0;
+  }
+  m.result = { matches, points };
+  c.stage = "results";
+
+  const scored = room.players.map((p) => `${p.username} +${points[p.id]}`).join(", ");
+  addLog(room, doer.id, "🎮", `${c.question}: ${matches}/${m.items.length} matches (${scored})`);
+  addMoment(room, {
+    type: "play",
+    question: c.question,
+    playerId: doer.id,
+    partnerId: partner.id,
+    note: m.items.map((item, i) => `${item.text ? `${item.text}: ` : ""}${item.options[a[i]]} / ${item.options[b[i]]}`).join(" · "),
+  });
+}
+
+function endDrawing(room, c, doer, partner, guessed) {
+  const m = c.mini;
+  const points = {};
+  if (guessed) {
+    for (const p of room.players) {
+      countMiniGame(p, true);
+      points[p.id] = award(p, c.points);
+    }
+    addLog(room, partner.id, "🎨", `${partner.username} guessed ${doer.username}'s drawing: “${m.word}” (+${c.points} each)`);
+    addMoment(room, { type: "play", question: c.question, playerId: doer.id, partnerId: partner.id, note: `Drew “${m.word}” and it was guessed` });
+  } else {
+    room.players.forEach((p) => countMiniGame(p, false));
+    addLog(room, doer.id, "🎨", `Nobody got ${doer.username}'s drawing: it was “${m.word}”`);
+  }
+  m.result = { guessed, points };
+  c.stage = "results";
+  c.endsAt = null;
+}
+
+function miniGameAction(room, player, c, { action, text, picks }) {
+  const isDoer = c.playerId === player.id;
+  const doer = room.players.find((p) => p.id === c.playerId);
+  const partner = otherPlayer(room, doer);
+  const m = c.mini;
+  if (!partner) return "";
+
+  // The one who landed can skip until there's a result (giving up a drawing shows the word)
+  if (action === "skip" && isDoer && c.stage !== "results") {
+    doer.tally.skipped += 1;
+    if (c.stage === "drawing") {
+      endDrawing(room, c, doer, partner, false);
+      return null;
+    }
+    addLog(room, doer.id, "⏭️", `${doer.username} skipped ${c.question}`);
+    endTurn(room);
+    return null;
+  }
+
+  switch (c.stage) {
+    case "pending":
+      if (!isDoer || action !== "start") return "";
+      startMiniGame(room, c, doer, partner);
+      return null;
+
+    case "picking": {
+      if (action !== "pick") return "";
+      if (m.picks[player.id]) return "You already locked in your picks";
+      const valid = Array.isArray(picks) && picks.length === m.items.length && picks.every((x) => x === 0 || x === 1);
+      if (!valid) return "Pick one option for every question";
+      m.picks[player.id] = picks;
+      if (room.players.every((p) => m.picks[p.id])) finishPicks(room, c, doer, partner);
+      return null;
+    }
+
+    case "writing": {
+      if (!isDoer || action !== "answer") return "";
+      const value = cleanText(text, C.MAX_ANSWER_LENGTH);
+      if (!value) return "Type something first";
+      c.answer = value;
+      c.note = `${m.prompt.replace(/…/g, "").trim()} ${value}`; // shows in the memory book
+      c.stage = "rating";
+      addLog(room, doer.id, "✍️", `${doer.username} finished the sentence, waiting for ${partner.username}'s rating`, c.note);
+      return null;
+    }
+
+    case "drawing": {
+      if (action === "timeup") {
+        if (Date.now() < c.endsAt) return "";
+        endDrawing(room, c, doer, partner, false);
+        return null;
+      }
+      if (isDoer || action !== "guess") return "";
+      if (Date.now() > c.endsAt + C.TIMER_GRACE_MS) return "Time's up!";
+      const value = cleanText(text, C.MAX_ANSWER_LENGTH);
+      if (!value) return "Type a guess first";
+      if (guessMatches(value, m.word)) {
+        endDrawing(room, c, doer, partner, true);
+      } else {
+        m.guesses = [...m.guesses, value].slice(-C.MAX_DRAW_GUESSES);
+      }
+      return null;
+    }
+
+    case "results":
+      if (!isDoer || action !== "continue") return "";
+      endTurn(room);
+      return null;
+  }
+  return "";
+}
+
+// Live drawing: only the drawer, only while drawing. Points are 0..1 so any screen size works.
+function addStroke(room, player, stroke) {
+  const c = room.challenge;
+  if (!c?.mini || c.mini.game !== "draw" || c.stage !== "drawing" || c.playerId !== player.id) return null;
+  if (c.mini.strokes.length >= C.MAX_STROKES) return null;
+
+  const points = (Array.isArray(stroke?.points) ? stroke.points.slice(0, C.MAX_STROKE_POINTS) : [])
+    .filter((pt) => Array.isArray(pt) && pt.length === 2 && pt.every((n) => Number.isFinite(n)))
+    .map((pt) => pt.map((n) => Math.min(1, Math.max(0, Math.round(n * 1000) / 1000))));
+  if (points.length === 0) return null;
+
+  const color = typeof stroke.color === "string" && /^#[0-9a-f]{6}$/i.test(stroke.color) ? stroke.color : "#ffffff";
+  const size = Math.min(24, Math.max(1, Math.round(Number(stroke.size) || 4)));
+  const saved = { points, color, size };
+  c.mini.strokes.push(saved);
+  return saved;
+}
+
+function clearDrawing(room, player) {
+  const c = room.challenge;
+  if (!c?.mini || c.mini.game !== "draw" || c.stage !== "drawing" || c.playerId !== player.id) return false;
+  c.mini.strokes = [];
+  return true;
+}
+
+// For a (re)opened drawing card: the strokes so far, and the word only for the drawer
+function drawingState(room, player) {
+  const c = room.challenge;
+  if (!c?.mini || c.mini.game !== "draw") return { strokes: [], word: null };
+  const canSee = c.playerId === player.id || c.stage === "results";
+  return { strokes: c.mini.strokes, word: canSee ? c.mini.word : null };
+}
+
+/* =========================
    CARDS + SHOP
 ========================= */
 
@@ -760,6 +1012,11 @@ function usePowerUp(room, player, card, target) {
   if (c.cardUsed) return { error: "Only one card per challenge" };
   if (c.stage !== "pending" && c.stage !== "guessing") return { error: "You can't use a card right now" };
   if (c.stage === "guessing" && (c.answer !== null || c.guess !== null)) return { error: "Too late, answers are already in" };
+
+  // In the pick games and Draw It you both play and score anyway
+  const bothPlay = c.mini && c.mini.game !== "finish";
+  if (bothPlay && card === "mirror") return { error: "Mirror doesn't work on this mini-game (you both score already)" };
+  if (bothPlay && c.mini.game !== "draw" && card === "handOff") return { error: "Pass It On doesn't work on this mini-game (you both play it)" };
 
   if (card === "freePass") {
     consume();
@@ -873,6 +1130,8 @@ module.exports = {
   generateBoard,
   createRoom,
   createPlayer,
+  pickAvatar,
+  setAvatar,
   normalizeRoom,
   resetGame,
   addLog,
@@ -880,6 +1139,9 @@ module.exports = {
   publicState,
   resolveRoll,
   challengeAction,
+  addStroke,
+  clearDrawing,
+  drawingState,
   usePowerUp,
   buyCard,
   updateLook,

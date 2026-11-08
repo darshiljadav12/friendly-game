@@ -234,6 +234,14 @@ body::before {
       0 12px 30px rgba(0, 0, 0, 0.35);
   }
 
+  /* Phones/tablets: skip the frosted-glass blur. It's re-calculated every frame while the hearts
+     behind it float, which makes moves stutter; the panel colour is nearly opaque anyway. */
+  @media (hover: none), (max-width: 1023px) {
+    .panel {
+      backdrop-filter: none;
+    }
+  }
+
   .panel-label {
     font-size: 0.7rem;
     font-weight: 700;
@@ -325,14 +333,172 @@ body::before {
    BOARD
 ========================= */
 
+/* =========================
+   BOARD (game-table look)
+========================= */
+
+/* Deep felt in the theme colour, a raised frame with a gold edge, and marquee lights around it */
 .board-frame {
-  background: var(--sunken);
-  border: 1px solid var(--line);
+  background:
+    radial-gradient(ellipse 70% 60% at 50% 45%, color-mix(in srgb, var(--rose) 16%, transparent), transparent 70%),
+    linear-gradient(160deg, color-mix(in srgb, var(--bg-a) 70%, black), color-mix(in srgb, var(--bg-c) 80%, black));
+  border: 1px solid color-mix(in srgb, var(--gold) 30%, transparent);
   box-shadow:
-    inset 0 2px 12px rgba(0, 0, 0, 0.6),
-    0 0 0 8px var(--surface),
-    0 0 0 9px var(--line),
-    0 24px 50px rgba(0, 0, 0, 0.5);
+    inset 0 2px 14px rgba(0, 0, 0, 0.6),
+    0 0 0 10px var(--surface-2),
+    0 0 0 11px color-mix(in srgb, var(--gold) 18%, transparent),
+    0 26px 50px rgba(0, 0, 0, 0.5);
+}
+
+/* Marquee bulbs on the outer frame: two sets of dots that take turns lighting up */
+.board-frame::before,
+.board-frame::after {
+  content: "";
+  position: absolute;
+  inset: -11px;
+  border-radius: calc(1rem + 10px);
+  pointer-events: none;
+  background: radial-gradient(circle, var(--gold) 0 1.6px, transparent 2.2px) 0 0 / 20px 20px;
+  /* keep only a thin ring at the edge (where the frame is) */
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box exclude,
+    linear-gradient(#000 0 0);
+  padding: 8px;
+  opacity: 0.3;
+  animation: bulbs 4s ease-in-out infinite;
+}
+
+.board-frame::after {
+  background-position: 10px 10px;
+  background-image: radial-gradient(circle, var(--rose) 0 1.6px, transparent 2.2px);
+  animation-delay: -2s;
+}
+
+@keyframes bulbs {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.1;
+  }
+}
+
+/* The empty middle of the board (inside the ring of tiles) */
+.board-table {
+  position: absolute;
+  inset: 13.6%;
+  border-radius: 14px;
+  overflow: hidden;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 45%, color-mix(in srgb, var(--rose) 12%, transparent), transparent 62%),
+    repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.02) 0 1px, transparent 1px 22px),
+    repeating-linear-gradient(-45deg, rgba(255, 255, 255, 0.02) 0 1px, transparent 1px 22px);
+}
+
+/* soft light rays turning slowly behind the dice */
+.board-rays {
+  position: absolute;
+  inset: -40%;
+  background: repeating-conic-gradient(from 0deg, color-mix(in srgb, var(--gold) 5%, transparent) 0 8deg, transparent 8deg 24deg);
+  -webkit-mask: radial-gradient(circle, #000 0%, transparent 55%);
+  mask: radial-gradient(circle, #000 0%, transparent 55%);
+  animation: rays 90s linear infinite;
+}
+
+@keyframes rays {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* dashed "path" just inside the tiles */
+.board-track {
+  position: absolute;
+  inset: 6px;
+  border: 1.5px dashed color-mix(in srgb, var(--gold) 15%, transparent);
+  border-radius: 10px;
+}
+
+/* =========================
+   TILES
+========================= */
+
+.game-tile {
+  overflow: hidden;
+  transition: transform 0.2s ease;
+}
+
+/* glossy highlight across the top + fine stripes */
+.game-tile::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 90% 55% at 50% 0%, rgba(255, 255, 255, 0.18), transparent 70%),
+    repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.03) 0 2px, transparent 2px 7px);
+}
+
+.tile-mark {
+  position: absolute;
+  right: -14%;
+  bottom: -16%;
+  font-size: clamp(22px, 6cqw, 44px);
+  line-height: 1;
+  opacity: 0.1;
+  transform: rotate(-14deg);
+  pointer-events: none;
+  filter: saturate(0.6);
+}
+
+.tile-icon {
+  position: relative;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.35));
+}
+
+.tile-label {
+  position: relative;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.25);
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: rgba(255, 255, 255, 0.92);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35);
+}
+
+@media (hover: hover) {
+  .game-tile:hover {
+    transform: translateY(-2px);
+  }
+}
+
+/* START: a shine sweeps across it every few seconds */
+.tile-start::after {
+  content: "";
+  position: absolute;
+  inset: -20% auto -20% -60%;
+  width: 45%;
+  pointer-events: none;
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+  transform: skewX(-18deg);
+  animation: tile-shine 6s ease-in-out infinite;
+}
+
+@keyframes tile-shine {
+  0%,
+  55% {
+    transform: translateX(0) skewX(-18deg);
+  }
+  100% {
+    transform: translateX(420%) skewX(-18deg);
+  }
 }
 
 /* active player's token on the board */
@@ -344,6 +510,44 @@ body::before {
   50% {
     transform: scale(1.2);
   }
+}
+
+/* avatar bubble (board pieces, scoreboard, results) */
+.avatar-bubble {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: 2.5px solid;
+  line-height: 1;
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.85),
+    inset 0 -3px 6px rgba(0, 0, 0, 0.2),
+    0 4px 10px rgba(0, 0, 0, 0.45);
+}
+
+/* the little point under a board piece, so it reads like a map pin */
+.piece-pointer {
+  position: absolute;
+  left: 50%;
+  top: calc(100% - 2px);
+  transform: translateX(-50%);
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 8px solid;
+  filter: drop-shadow(0 2px 1px rgba(0, 0, 0, 0.35));
+}
+
+/* soft shadow on the tile under a piece */
+.piece-shadow {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 3px);
+  width: 60%;
+  height: 18%;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(0, 0, 0, 0.55), transparent 70%);
 }
 
 .token-active {

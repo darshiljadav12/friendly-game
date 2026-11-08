@@ -1,4 +1,4 @@
-export type TileType = "start" | "love" | "dare" | "memory" | "gift" | "guess" | "wild" | "timed";
+export type TileType = "start" | "love" | "dare" | "memory" | "gift" | "guess" | "wild" | "timed" | "play";
 
 export type PlayableTile = Exclude<TileType, "start">;
 
@@ -31,11 +31,13 @@ export type Tally = {
   sixes: number;
   laps: number;
   notes: number;
+  minigames?: number; // missing on older games
 };
 
 export type Player = {
   id: string;
   username: string;
+  avatar: string; // board piece emoji
   slot: 0 | 1 | null;
   connected: boolean;
   position: number;
@@ -55,7 +57,7 @@ export type Challenge = {
   points: number;
   ownerId: string; // who landed on it
   playerId: string; // who has to do it
-  stage: "pending" | "rating" | "timing" | "guessing" | "reveal";
+  stage: "pending" | "rating" | "timing" | "guessing" | "reveal" | "picking" | "writing" | "drawing" | "results";
   handedOff: boolean;
   mirror: boolean;
   cardUsed: boolean;
@@ -65,7 +67,23 @@ export type Challenge = {
   answer: string | null;
   guess: string | null;
   confirmed: string[];
+  mini: MiniGameState | null; // 🎮 PLAY tile only
 };
+
+export type MiniGameName = "thisOrThat" | "neverEver" | "mostLikely" | "finish" | "draw";
+
+export type MiniGameState = {
+  game: MiniGameName;
+  prompt: string | null; // Finish My Sentence starter
+  items: { text: string; options: [string, string] }[] | null; // the pick games
+  picked: string[]; // who has locked in their picks
+  picks: Record<string, number[]> | null; // revealed with the results
+  guesses: string[]; // Draw It: wrong guesses so far
+  word: string | null; // Draw It: revealed with the results
+  result: { matches?: number; guessed?: boolean; points: Record<string, number> } | null;
+};
+
+export type Stroke = { points: [number, number][]; color: string; size: number };
 
 export type GameMode = "competitive" | "coop";
 
@@ -167,9 +185,14 @@ export type AchievementDef = {
   scope: "game" | "lifetime";
 };
 
+// A tab in the avatar picker
+export type AvatarGroup = { id: string; name: string; icon: string; avatars: string[] };
+
 export type Meta = {
   achievements: AchievementDef[];
   powerUps: Record<PowerUp, { name: string; icon: string; price: number }>;
+  avatars?: string[];
+  avatarGroups?: AvatarGroup[];
   persistent: boolean;
 };
 
@@ -183,7 +206,7 @@ export type AccountSession = {
 
 // What the server returns for the logged-in account
 export type AccountView = {
-  user: { username: string; name: string };
+  user: { username: string; name: string; avatar: string | null };
   slot: 0 | 1 | null; // seat in the couple, null until linked
   overview: CoupleOverview | null;
 };

@@ -15,6 +15,7 @@ const ACHIEVEMENTS = [
   { id: "card_shark", icon: "🃏", name: "Card Shark", desc: "Play 2 power-up cards in one game", scope: "game", check: (t) => t.cardsUsed >= 2 },
   { id: "lucky_sixes", icon: "🎲", name: "Lucky Sixes", desc: "Roll three 6s in one game", scope: "game", check: (t) => t.sixes >= 3 },
   { id: "globetrotter", icon: "🌍", name: "Globetrotter", desc: "Pass START 3 times in one game", scope: "game", check: (t) => t.laps >= 3 },
+  { id: "game_night", icon: "🎮", name: "Game Night", desc: "Play 3 mini-games in one game", scope: "game", check: (t) => (t.minigames || 0) >= 3 },
   { id: "big_spender", icon: "🛍️", name: "Big Spender", desc: "Spend 20 coins in one game", scope: "game", check: (t) => t.coinsSpent >= 20 },
 
   // ---- across all couple games ----

@@ -117,7 +117,7 @@ export function HistoryTab({ session, overview }: { session: AccountSession; ove
 ========================= */
 
 type MemoryFilter = "all" | "favorite" | ChallengeType;
-const MEMORY_FILTERS: MemoryFilter[] = ["all", "favorite", "love", "memory", "guess", "dare", "gift", "timed", "together"];
+const MEMORY_FILTERS: MemoryFilter[] = ["all", "favorite", "love", "memory", "guess", "dare", "gift", "timed", "play", "together"];
 
 export function MemoryBook({ session, overview }: { session: AccountSession; overview: CoupleOverview }) {
   const [memories, setMemories] = useState<Memory[] | null>(null);
@@ -233,6 +233,7 @@ export function StatsTab({ overview }: { overview: CoupleOverview }) {
     ["😍 Perfect 3-heart answers", (s) => s.threeHearts],
     ["🔮 Guess matches", (s) => `${s.guessMatches} (${pct(s.guessMatches, s.guessRounds)})`],
     ["⏱️ Timers beaten", (s) => s.timedInTime],
+    ["🎮 Mini-games played", (s) => s.minigames ?? 0],
     ["⏳ Dares saved", (s) => s.saved],
     ["💌 IOU dares kept", (s) => s.iouDone],
     ["🃏 Cards played", (s) => s.cardsUsed],

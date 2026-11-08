@@ -5,7 +5,8 @@ import { gsap } from "gsap";
 import { socket, adoptPlayerId, getPlayerId, getSavedRoom, saveRoom, subscribePlayerId } from "../lib/socket";
 import { sound, vibrate } from "../lib/sound";
 import { accountSession, request } from "../lib/couple";
-import { a11yPrefs, effectiveA11y, prefersReducedMotion } from "../lib/prefs";
+import { a11yPrefs, avatarPref, effectiveA11y, prefersReducedMotion } from "../lib/prefs";
+import { AVATAR_GROUPS, AvatarPicker, AvatarBubble, BoardPiece } from "./components/Avatar";
 import {
   BOARD_LAYOUT,
   DEFAULT_NEW_GAME,
@@ -15,7 +16,6 @@ import {
   needsMyAction,
   playerTheme,
   setColorBlindPalette,
-  sphereStyle,
   tileStyle,
 } from "./constants";
 import type {
@@ -49,9 +49,8 @@ gsap.defaults({
   overwrite: "auto",
 });
 
-const TOKEN_SIZE = 24;
 const DICE_SETTLE_MS = 600; // let the dice land before the token starts moving
-const STEP_DURATION = 0.3;
+const STEP_DURATION = 0.26;
 const TOAST_MS = 4000;
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -74,12 +73,22 @@ const reduceMotionNow = () => document.documentElement.hasAttribute("data-reduce
 
 // Position (relative to the board) that centers a token on a tile.
 // Uses layout offsets rather than screen rects so tile animations don't skew it.
-function tokenPoint(tile: HTMLElement | null | undefined, offset = 0) {
+// Resting: the piece stands on the top edge of its tile (pin tip just inside it), so the
+// tile's icon and name stay visible. `offset` puts two pieces on one tile side by side.
+function restPoint(tile: HTMLElement | null | undefined, size: number, offset = 0) {
   if (!tile) return null;
-
   return {
-    x: tile.offsetLeft + tile.offsetWidth / 2 - TOKEN_SIZE / 2 + offset,
-    y: tile.offsetTop + tile.offsetHeight / 2 - TOKEN_SIZE / 2 + 2,
+    x: tile.offsetLeft + tile.offsetWidth / 2 - size / 2 + offset,
+    y: tile.offsetTop + tile.offsetHeight * 0.14 - size - 6,
+  };
+}
+
+// Moving: the piece runs over the middle of each tile
+function runPoint(tile: HTMLElement | null | undefined, size: number) {
+  if (!tile) return null;
+  return {
+    x: tile.offsetLeft + tile.offsetWidth / 2 - size / 2,
+    y: tile.offsetTop + tile.offsetHeight / 2 - size / 2,
   };
 }
 
@@ -192,13 +201,14 @@ export default function Home() {
 
     state.players.forEach((p) => {
       // Spread tokens out when players share a tile
+      const el = tokenRefs.current[p.id];
+      if (!el) return;
       const sharing = state.players.filter((o) => o.position === p.position);
       const slot = sharing.findIndex((o) => o.id === p.id);
-      const offset = (slot - (sharing.length - 1) / 2) * TOKEN_SIZE * 0.8;
+      const offset = (slot - (sharing.length - 1) / 2) * el.offsetWidth * 0.75;
 
-      const el = tokenRefs.current[p.id];
-      const point = tokenPoint(tileRefs.current[p.position], offset);
-      if (!el || !point) return;
+      const point = restPoint(tileRefs.current[p.position], el.offsetWidth, offset);
+      if (!point) return;
 
       if (animate && !reduceMotionNow()) gsap.to(el, { ...point, duration: 0.35, ease: "power2.out" });
       else gsap.set(el, point);
@@ -236,24 +246,36 @@ export default function Home() {
         const step = fast ? 0.05 : move.dice === null ? 0.6 : STEP_DURATION; // teleport is one long jump
         const tl = gsap.timeline({ onComplete: () => resolve() });
 
+        // Every step starts at a fixed time (i * step) so the extra effects never add pauses between steps
+        let t = 0;
         move.steps.forEach((index) => {
           const tile = tileRefs.current[index];
-          const point = tokenPoint(tile);
+          const point = runPoint(tile, el.offsetWidth);
           if (!tile || !point) return;
 
-          tl.call(() => sound.step());
-          tl.to(el, { ...point, duration: step, ease: "power1.inOut" });
-          // little jump on every step
+          tl.call(() => sound.step(), [], t);
+          // Glide at a steady speed between tiles (easing each step made it stop-start) and let
+          // the hop give the bounce: up with ease-out, down with ease-in, like a real jump
+          tl.to(el, { ...point, duration: step, ease: move.dice === null ? "power2.inOut" : "none" }, t);
           if (hop && !fast) {
-            tl.to(hop, { y: move.dice === null ? -40 : -14, scale: 1.15, duration: step / 2, yoyo: true, repeat: 1, ease: "power1.out" }, "<");
+            const height = move.dice === null ? -40 : -14;
+            tl.to(hop, { y: height, scale: 1.12, duration: step / 2, ease: "sine.out" }, t);
+            tl.to(hop, { y: 0, scale: 1, duration: step / 2, ease: "sine.in" }, t + step / 2);
           }
-          if (!fast) tl.to(tile, { y: 3, duration: 0.1, yoyo: true, repeat: 1, ease: "power1.out" }, `<${step * 0.8}`);
+          // the tile dips a little as the token lands on it
+          if (!fast) tl.to(tile, { y: 3, duration: 0.07, yoyo: true, repeat: 1, ease: "power1.out" }, t + step - 0.05);
+          t += step;
         });
 
+        // Landing pop (transform only: animating a filter repaints the tile every frame, which stutters on phones)
         const lastTile = tileRefs.current[move.steps[move.steps.length - 1]];
         if (lastTile && !fast) {
-          tl.fromTo(lastTile, { filter: "brightness(1)" }, { filter: "brightness(1.5)", duration: 0.3, yoyo: true, repeat: 1 });
+          tl.to(lastTile, { scale: 1.08, duration: 0.15, yoyo: true, repeat: 1, ease: "power1.out" }, t + 0.1);
         }
+        // Landed: hop up onto the top edge of the tile (placeTokens then spreads two pieces apart if needed)
+        const rest = restPoint(lastTile, el.offsetWidth);
+        if (rest) tl.to(el, { ...rest, duration: fast ? 0.05 : 0.3, ease: "back.out(2)" }, t + 0.05);
+        tl.set(move.steps.map((i) => tileRefs.current[i]).filter(Boolean), { clearProps: "transform" });
 
         if (tl.duration() === 0) resolve();
       });
@@ -443,7 +465,7 @@ export default function Home() {
   useEffect(() => {
     if (!joinCode || !session || !account?.overview || account.overview.members.length < 2 || game || autoJoined.current || !connected) return;
     autoJoined.current = true;
-    socket.emit("joinRoom", { roomId: joinCode, playerId: myId, couple: session, username: account.user.name });
+    socket.emit("joinRoom", { roomId: joinCode, playerId: myId, couple: session, username: account.user.name, avatar: avatarPref.get() });
   }, [joinCode, session, account, game, connected, myId]);
 
   // ---------------------------
@@ -535,21 +557,21 @@ export default function Home() {
   // ACTIONS
   // ---------------------------
   const createRoom = (username: string) => {
-    socket.emit("createRoom", { username, playerId: myId, settings: newGame });
+    socket.emit("createRoom", { username, playerId: myId, settings: newGame, avatar: avatarPref.get() });
   };
 
   const joinRoom = (username: string, roomCode: string) => {
-    socket.emit("joinRoom", { roomId: roomCode, username, playerId: myId, couple: overview ? session : undefined });
+    socket.emit("joinRoom", { roomId: roomCode, username, playerId: myId, couple: overview ? session : undefined, avatar: avatarPref.get() });
   };
 
   const startCoupleGame = () => {
     if (!session) return;
-    socket.emit("createRoom", { playerId: myId, settings: newGame, couple: session });
+    socket.emit("createRoom", { playerId: myId, settings: newGame, couple: session, avatar: avatarPref.get() });
   };
 
   const joinCoupleGame = (roomId: string) => {
     if (!session || !account) return;
-    socket.emit("joinRoom", { roomId, playerId: myId, couple: session, username: account.user.name });
+    socket.emit("joinRoom", { roomId, playerId: myId, couple: session, username: account.user.name, avatar: avatarPref.get() });
   };
 
   const login = (s: AccountSession, view: AccountView) => {
@@ -569,6 +591,11 @@ export default function Home() {
     setAccount(null);
   };
 
+  const pickAvatar = (avatar: string) => {
+    avatarPref.set(avatar);
+    socket.emit("setAvatar", { avatar });
+  };
+
   const changeLook = (patch: { theme?: string; a11y?: Partial<Settings["a11y"]> }) => socket.emit("updateLook", patch);
 
   const rollDice = () => {
@@ -579,7 +606,7 @@ export default function Home() {
     socket.emit("rollDice");
   };
 
-  const challengeAction = (action: ChallengeAction, extra: { hearts?: number; text?: string; note?: string } = {}) => {
+  const challengeAction = (action: ChallengeAction, extra: { hearts?: number; text?: string; note?: string; picks?: number[] } = {}) => {
     setError(null);
     socket.emit("challengeAction", { action, ...extra });
   };
@@ -666,7 +693,7 @@ export default function Home() {
 
       {/* ANNOUNCEMENT TOAST */}
       {toast && (
-        <div className="pointer-events-none fixed inset-x-0 top-4 z-40 flex justify-center px-4" role="status" aria-live="polite">
+        <div className="pointer-events-none fixed inset-x-0 top-[calc(env(safe-area-inset-top)+1rem)] z-40 flex justify-center px-4" role="status" aria-live="polite">
           <div key={toast.id} className="toast-in panel max-w-lg px-4 py-2.5 text-center text-sm font-semibold border-gold/40">
             {toast.text}
           </div>
@@ -818,12 +845,17 @@ export default function Home() {
                           }}
                         >
                           <div className="flex items-center gap-2.5">
-                            <div
-                              className={`w-9 h-9 flex items-center justify-center font-black text-sm text-[#1b1020] ${p.connected ? "" : "opacity-40 grayscale"}`}
-                              style={sphereStyle(colorIndex(p.id))}
-                            >
-                              {p.username[0]?.toUpperCase()}
-                            </div>
+                            {p.id === myId ? (
+                              <AvatarPicker
+                                avatar={p.avatar}
+                                groups={meta?.avatarGroups ?? (meta?.avatars ? [{ ...AVATAR_GROUPS[0], avatars: meta.avatars }] : AVATAR_GROUPS)}
+                                takenBy={Object.fromEntries(game.players.filter((o) => o.id !== myId).map((o) => [o.avatar, o.username]))}
+                                colorIndex={colorIndex(p.id)}
+                                onPick={pickAvatar}
+                              />
+                            ) : (
+                              <AvatarBubble avatar={p.avatar} colorIndex={colorIndex(p.id)} faded={!p.connected} className="h-9 w-9 text-xl" />
+                            )}
 
                             <div className="text-sm">
                               <p className="font-semibold">
@@ -1008,16 +1040,24 @@ export default function Home() {
               ========================== */}
               <div className="flex-1 flex flex-col items-center gap-4 order-1 lg:order-2">
                 <div
-                  className="board-frame relative grid grid-cols-8 w-full max-w-160 aspect-square p-2 sm:p-3 gap-1 sm:gap-1.5 rounded-2xl"
+                  className="board-frame @container relative grid grid-cols-8 w-full max-w-160 aspect-square p-2 sm:p-3 gap-1 sm:gap-1.5 rounded-2xl"
                   role="group"
                   aria-label="Game board"
                 >
+                  {/* game-table middle: spotlight, slow light rays and a dashed track (decoration only) */}
+                  <div className="board-table" aria-hidden>
+                    <div className="board-rays" />
+                    <div className="board-track" />
+                  </div>
                   {BOARD_LAYOUT.map((tileIndex, i) => {
                     const type = tileIndex === null ? undefined : game.board[tileIndex];
                     if (tileIndex === null || !type) return <div key={i} />;
 
-                    const here = game.players.filter((p) => p.position === tileIndex).map((p) => p.username);
+                    const occupants = game.players.filter((p) => p.position === tileIndex);
+                    const here = occupants.map((p) => p.username);
                     const label = `Tile ${tileIndex + 1}: ${TILE_INFO[type].label}${here.length ? `, ${here.join(" and ")} here` : ""}`;
+                    // ring in the colour of whoever stands here (the player whose turn it is, if both)
+                    const ringOwner = occupants.find((p) => p.id === currentPlayer?.id) ?? occupants[0];
                     const pickable = teleporting && me && tileIndex !== me.position;
 
                     return (
@@ -1026,8 +1066,11 @@ export default function Home() {
                         ref={(el) => {
                           tileRefs.current[tileIndex] = el;
                         }}
-                        className={`relative flex flex-col items-center justify-center rounded-md sm:rounded-lg text-center leading-none ${pickable ? "tile-pick" : ""}`}
-                        style={tileStyle(type)}
+                        className={`game-tile ${type === "start" ? "tile-start" : ""} relative flex flex-col items-center justify-center rounded-md sm:rounded-lg text-center leading-none ${pickable ? "tile-pick" : ""}`}
+                        style={{
+                          ...tileStyle(type),
+                          ...(ringOwner && !pickable ? { outline: `2px solid ${playerTheme(colorIndex(ringOwner.id)).base}`, outlineOffset: 1 } : {}),
+                        }}
                         title={`${TILE_INFO[type].label}: ${TILE_INFO[type].sub}`}
                         aria-label={label}
                         role={pickable ? "button" : undefined}
@@ -1035,10 +1078,14 @@ export default function Home() {
                         onClick={pickable ? () => teleportTo(tileIndex) : undefined}
                         onKeyDown={pickable ? (e) => (e.key === "Enter" || e.key === " ") && teleportTo(tileIndex) : undefined}
                       >
-                        <div className="text-sm sm:text-lg" aria-hidden>
+                        {/* big faded copy of the icon in the corner */}
+                        <span className="tile-mark" aria-hidden>
+                          {TILE_THEMES[type].icon}
+                        </span>
+                        <div className="tile-icon text-sm sm:text-xl" aria-hidden>
                           {TILE_THEMES[type].icon}
                         </div>
-                        <div className="mt-0.5 sm:mt-1 text-[6px] sm:text-[8px] font-bold tracking-widest text-white/85" aria-hidden>
+                        <div className="tile-label mt-0.5 sm:mt-1 text-[6px] sm:text-[8px]" aria-hidden>
                           {TILE_INFO[type].label}
                         </div>
                       </div>
@@ -1053,23 +1100,23 @@ export default function Home() {
                         ref={(el) => {
                           tokenRefs.current[p.id] = el;
                         }}
-                        className="absolute top-0 left-0"
-                        style={{ width: TOKEN_SIZE, height: TOKEN_SIZE }}
+                        // size follows the board (cqw = % of the board's width)
+                        className="absolute top-0 left-0 h-[clamp(22px,5.4cqw,36px)] w-[clamp(22px,5.4cqw,36px)] will-change-transform"
                       >
+                        {/* shadow stays on the tile while the piece hops */}
+                        <span className="piece-shadow" />
                         <div
                           ref={(el) => {
                             hopRefs.current[p.id] = el;
                           }}
-                          className="w-full h-full"
+                          className="w-full h-full will-change-transform"
                         >
-                          <div
-                            className={`w-full h-full flex items-center justify-center text-[10px] font-black text-[#1b1020] border-2 border-[#fdf2f8] ${
-                              game.phase === "playing" && game.turn === idx && !isMoving ? "token-active" : ""
-                            } ${p.connected ? "" : "opacity-40 grayscale"}`}
-                            style={sphereStyle(colorIndex(p.id))}
-                          >
-                            {p.username[0]?.toUpperCase()}
-                          </div>
+                          <BoardPiece
+                            avatar={p.avatar}
+                            colorIndex={colorIndex(p.id)}
+                            active={game.phase === "playing" && game.turn === idx && !isMoving}
+                            faded={!p.connected}
+                          />
                         </div>
                       </div>
                     ))}

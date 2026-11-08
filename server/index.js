@@ -133,6 +133,8 @@ io.on("connection", (socket) => {
     powerUps: C.POWER_UPS,
     boardPresets: Object.keys(C.BOARD_PRESETS),
     themes: C.THEMES,
+    avatars: C.AVATARS,
+    avatarGroups: C.AVATAR_GROUPS,
     persistent: db.isConnected(),
   });
 
@@ -274,7 +276,7 @@ io.on("connection", (socket) => {
   });
 
   /* -------- CREATE ROOM -------- */
-  socket.on("createRoom", async ({ username, playerId, settings, couple } = {}) => {
+  socket.on("createRoom", async ({ username, playerId, settings, couple, avatar } = {}) => {
     if (typeof playerId !== "string" || !playerId) return fail("Missing player id");
     if (getSeat()) return fail("You are already in a room");
 
@@ -289,11 +291,12 @@ io.on("connection", (socket) => {
       coupleCode = auth.couple._id;
       slot = auth.slot;
       name = auth.couple.members[slot].name;
+      avatar = auth.user.avatar ?? avatar; // couple accounts remember their pick
     }
     if (!name) return fail("Please enter your name");
 
     const room = game.createRoom(generateRoomId(), game.parseSettings(settings), coupleCode);
-    const player = game.createPlayer(playerId, name, socket.id, slot);
+    const player = game.createPlayer(playerId, name, socket.id, slot, game.pickAvatar(room, avatar));
     room.creatorId = player.id;
     room.players.push(player);
     rooms[room.id] = room;
@@ -306,7 +309,7 @@ io.on("connection", (socket) => {
   });
 
   /* -------- JOIN ROOM -------- */
-  socket.on("joinRoom", async ({ roomId, username, playerId, couple } = {}) => {
+  socket.on("joinRoom", async ({ roomId, username, playerId, couple, avatar } = {}) => {
     const code = typeof roomId === "string" ? roomId.trim().toUpperCase() : "";
     const room = rooms[code];
 
@@ -331,12 +334,13 @@ io.on("connection", (socket) => {
       if (seated) return takeOverSeat(room, seated, couple);
       slot = auth.slot;
       name = auth.couple.members[slot].name;
+      avatar = auth.user.avatar ?? avatar;
     }
     if (!name) return fail("Please enter your name");
     if (!rooms[code] || room.players.length >= C.MAX_PLAYERS) return fail("Room is full");
     if (room.players.some((p) => p.id === playerId)) return fail("You are already in this room");
 
-    const player = game.createPlayer(playerId, name, socket.id, slot);
+    const player = game.createPlayer(playerId, name, socket.id, slot, game.pickAvatar(room, avatar));
     room.players.push(player);
     seatPlayer(socket, room, player);
 
@@ -432,6 +436,36 @@ io.on("connection", (socket) => {
     const error = game.challengeAction(seat.room, seat.player, payload);
     if (error === null) commit(seat.room);
     else fail(error);
+  });
+
+  /* -------- AVATAR (board piece) -------- */
+  socket.on("setAvatar", ({ avatar } = {}) => {
+    const seat = getSeat();
+    if (!seat) return;
+    const error = game.setAvatar(seat.room, seat.player, avatar);
+    if (error) return fail(error);
+    broadcast(seat.room);
+    if (seat.room.coupleCode) couples.saveAvatar(seat.room.coupleCode, seat.player.slot, avatar).catch(() => {});
+  });
+
+  /* -------- DRAW IT (mini-game) -------- */
+  // Strokes go straight to the partner instead of a full state broadcast, so drawing feels live
+  socket.on("drawStroke", (stroke) => {
+    const seat = getSeat();
+    if (!seat) return;
+    const saved = game.addStroke(seat.room, seat.player, stroke);
+    if (saved) socket.to(seat.room.id).emit("drawStroke", saved);
+  });
+
+  socket.on("drawClear", () => {
+    const seat = getSeat();
+    if (seat && game.clearDrawing(seat.room, seat.player)) socket.to(seat.room.id).emit("drawClear");
+  });
+
+  // Strokes so far (after a refresh) and the secret word for the drawer
+  socket.on("drawSync", (_payload, ack) => {
+    const seat = getSeat();
+    reply(ack, seat ? game.drawingState(seat.room, seat.player) : { strokes: [], word: null });
   });
 
   /* -------- POWER-UP CARDS + SHOP -------- */
