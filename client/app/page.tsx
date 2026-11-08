@@ -141,6 +141,20 @@ export default function Home() {
   const mySlot = account?.slot ?? null;
   const mySlotRef = useRef<0 | 1 | null>(null);
   const [newGame, setNewGame] = useState<NewGameSettings>(DEFAULT_NEW_GAME);
+  const [appliedSetup, setAppliedSetup] = useState("none");
+
+  // When the couple's admin setup arrives or changes: new games default to "our board" and its theme.
+  // (Adjusting state during render, keyed on the setup's save time, instead of an effect.)
+  const setupKey = overview?.custom ? String(overview.custom.updatedAt) : "none";
+  if (setupKey !== appliedSetup) {
+    setAppliedSetup(setupKey);
+    const custom = overview?.custom;
+    setNewGame((prev) => ({
+      ...prev,
+      board: custom?.counts ? { preset: "ours", weights: null } : prev.board.preset === "ours" ? DEFAULT_NEW_GAME.board : prev.board,
+      theme: custom ? custom.theme : prev.theme,
+    }));
+  }
   const [diceValue, setDiceValue] = useState(1);
   const [isRolling, setIsRolling] = useState(false);
   const [isMoving, setIsMoving] = useState(false);
@@ -160,6 +174,8 @@ export default function Home() {
   const queue = useRef<RoomUpdate[]>([]);
   const prevScores = useRef<Record<string, number>>({});
   const autoJoined = useRef(false);
+  // What the invite link points to: a couple game (log in to join) or a quick game (enter a name)
+  const [invite, setInvite] = useState<{ exists: boolean; isCouple?: boolean } | null>(null);
 
   // ---------------------------
   // THEME + ACCESSIBILITY
@@ -377,12 +393,20 @@ export default function Home() {
       adoptPlayerId(playerId); // differs only when this browser took over a seat (reconnects as that seat)
     };
 
-    // The same account continued this game in another browser: this one is signed out
-    const onSeatMoved = () => {
+    // The same account continued this game somewhere else. Another browser/device revokes this login;
+    // another tab of this browser shares it, so re-check instead of logging out blindly.
+    const onSeatMoved = async () => {
       resetToLobby();
-      accountSession.set(null);
-      setAccount(null);
-      setError("You continued this game in another browser, so you were logged out here");
+      const s = accountSession.get();
+      const res = s ? await request<AccountView>("accountAuth", s) : null;
+      if (!res || res.error) {
+        accountSession.set(null);
+        setAccount(null);
+        setError("You continued this game in another browser, so you were logged out here");
+      } else {
+        setAccount(res);
+        setError("You continued this game in another tab");
+      }
     };
 
     const onRoomState = (update: RoomUpdate) => {
@@ -461,6 +485,13 @@ export default function Home() {
     mySlotRef.current = mySlot;
   }, [mySlot]);
 
+  useEffect(() => {
+    if (!joinCode || !connected) return;
+    request<{ exists: boolean; isCouple?: boolean }>("roomInfo", joinCode).then((res) => {
+      if (!res.error) setInvite(res);
+    });
+  }, [joinCode, connected]);
+
   // Invite link + logged in to a complete couple: join automatically, as yourself
   useEffect(() => {
     if (!joinCode || !session || !account?.overview || account.overview.members.length < 2 || game || autoJoined.current || !connected) return;
@@ -503,7 +534,8 @@ export default function Home() {
     tl.fromTo(
       card,
       { rotateY: -90, opacity: 0, transformPerspective: 800 },
-      { rotateY: 0, opacity: 1, duration: 0.6, ease: "back.out(1.4)" },
+      // clearProps: drop the leftover 3D transform afterwards, it makes phones draw the card (and the Draw It canvas) blurry
+      { rotateY: 0, opacity: 1, duration: 0.6, ease: "back.out(1.4)", clearProps: "transform,opacity" },
     );
 
     return () => {
@@ -713,6 +745,7 @@ export default function Home() {
             settings={newGame}
             onSettingsChange={setNewGame}
             initialJoinCode={joinCode}
+            invite={invite}
             onCreate={createRoom}
             onJoin={joinRoom}
             session={session}

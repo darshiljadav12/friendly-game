@@ -60,7 +60,8 @@ function parseBoard(raw = {}) {
   return { preset, weights };
 }
 
-function parseSettings(raw = {}) {
+// `custom` is the couple's admin setup (see couples.validateCustom); it allows the "ours" board
+function parseSettings(raw = {}, custom = null) {
   const mode = raw.mode === "coop" ? "coop" : "competitive";
   let length = Object.hasOwn(C.LENGTH_OPTIONS, raw.length) ? String(raw.length) : "10";
 
@@ -76,18 +77,23 @@ function parseSettings(raw = {}) {
     rounds: option.rounds ?? null,
     target: option.target ?? null,
     coopGoal: mode === "coop" ? option.rounds * C.COOP_POINTS_PER_ROUND : null,
-    board: parseBoard(raw.board),
+    board: raw.board?.preset === "ours" && custom?.counts ? { preset: "ours", weights: null, counts: custom.counts } : parseBoard(raw.board),
     theme: C.THEMES.includes(raw.theme) ? raw.theme : "warm",
     a11y,
   };
 }
 
 // 27 playable tiles after START, in the proportions of the chosen preset
-function generateBoard({ preset, weights }) {
+function generateBoard({ preset, weights, counts }) {
   const count = C.BOARD_SIZE - 1;
 
   if (preset === "classic") {
     return ["start", ...Array.from({ length: count }, (_, i) => C.CLASSIC_PATTERN[i % C.CLASSIC_PATTERN.length])];
+  }
+
+  // The couple's own board: exactly these many tiles of each type
+  if (preset === "ours" && counts) {
+    return ["start", ...spreadOut(shuffle(Object.entries(counts).flatMap(([type, n]) => Array(n).fill(type))))];
   }
 
   const mix = preset === "custom" ? weights : C.BOARD_PRESETS[preset];
@@ -96,22 +102,23 @@ function generateBoard({ preset, weights }) {
 
   // Largest-remainder rounding so the counts add up to exactly 27
   const exact = entries.map(([type, w]) => ({ type, value: (w / total) * count }));
-  const counts = exact.map((e) => ({ type: e.type, n: Math.floor(e.value), rest: e.value % 1 }));
-  let missing = count - counts.reduce((sum, c) => sum + c.n, 0);
-  [...counts].sort((a, b) => b.rest - a.rest).forEach((c) => {
+  const amounts = exact.map((e) => ({ type: e.type, n: Math.floor(e.value), rest: e.value % 1 }));
+  let missing = count - amounts.reduce((sum, c) => sum + c.n, 0);
+  [...amounts].sort((a, b) => b.rest - a.rest).forEach((c) => {
     if (missing-- > 0) c.n += 1;
   });
 
-  const tiles = shuffle(counts.flatMap((c) => Array(c.n).fill(c.type)));
+  return ["start", ...spreadOut(shuffle(amounts.flatMap((c) => Array(c.n).fill(c.type))))];
+}
 
-  // Spread them out a little so the same type isn't bunched together
+// Spread tiles out a little so the same type isn't bunched together
+function spreadOut(tiles) {
   for (let i = 1; i < tiles.length; i++) {
     if (tiles[i] !== tiles[i - 1]) continue;
     const j = tiles.findIndex((t, k) => k > i && t !== tiles[i - 1] && tiles[k - 1] !== tiles[i]);
     if (j !== -1) [tiles[i], tiles[j]] = [tiles[j], tiles[i]];
   }
-
-  return ["start", ...tiles];
+  return tiles;
 }
 
 /* =========================
@@ -140,9 +147,11 @@ function emptyTally() {
   };
 }
 
-function createRoom(roomId, settings, coupleCode = null) {
+// `content` = the couple's own questions and allowed mini-games ({ questions, miniGames }), or null
+function createRoom(roomId, settings, coupleCode = null, content = null) {
   return {
     id: roomId,
+    content,
     phase: "waiting", // waiting | playing | finished
     settings,
     board: generateBoard(settings.board),
@@ -252,8 +261,15 @@ function drawFrom(room, key, list) {
   return room.decks[key].pop();
 }
 
+// The couple's own list replaces the built-in one when they uploaded one
+function questionList(room, key, builtIn) {
+  const own = room.content?.questions?.[key];
+  return own?.length ? own : builtIn;
+}
+
 function drawQuestion(room, type) {
-  return QUESTIONS[type] ? drawFrom(room, type, QUESTIONS[type]) : null;
+  const list = questionList(room, type, QUESTIONS[type]);
+  return list ? drawFrom(room, type, list) : null;
 }
 
 // The wanted avatar if it's valid and free, otherwise the first free one (🐻, then 🐰, …)
@@ -307,16 +323,22 @@ function addMoment(room, moment) {
 
 // 🎮 PLAY: a random mini-game, never the same one twice in a row
 function pickMiniGame(room) {
-  const options = Object.keys(C.MINI_GAMES).filter((g) => g !== room.lastMiniGame);
+  const allowed = room.content?.miniGames?.length ? room.content.miniGames : Object.keys(C.MINI_GAMES);
+  const options = allowed.length > 1 ? allowed.filter((g) => g !== room.lastMiniGame) : allowed;
   room.lastMiniGame = pick(options);
   return room.lastMiniGame;
 }
 
+// Cards talk to the player whose turn it is ("you"); {partner} becomes the other player's name
+const fillPartner = (text, partnerName) => (typeof text === "string" ? text.replace(/\{partner\}/gi, partnerName || "your partner") : text);
+
 function makeChallenge(room, type, player) {
   const mini = type === "play" ? { game: pickMiniGame(room), prompt: null, items: null, picks: {}, word: null, strokes: [], guesses: [], result: null } : null;
+  const template = mini ? `${C.MINI_GAMES[mini.game].icon} ${C.MINI_GAMES[mini.game].title}` : drawQuestion(room, type);
   return {
     type,
-    question: mini ? `${C.MINI_GAMES[mini.game].icon} ${C.MINI_GAMES[mini.game].title}` : drawQuestion(room, type),
+    template, // the question before {partner} is filled in (Pass It On fills it again for the new player)
+    question: fillPartner(template, otherPlayer(room, player)?.username),
     mini,
     points: C.POINTS[type] || 0,
     ownerId: player.id, // who landed on it
@@ -641,8 +663,11 @@ function challengeAction(room, player, { action, hearts, text, note, picks } = {
   if (c.type === "play" && c.stage !== "rating") return miniGameAction(room, player, c, { action, text, picks });
 
   switch (c.stage) {
+    // Guess: the question is about the partner. The player who landed guesses, the partner types
+    // the real answer; nobody sees either until both are in.
     case "guessing": {
       if (action === "skip" && isDoer) {
+        if (c.guess !== null) return "You already locked in your guess";
         doer.tally.skipped += 1;
         addLog(room, doer.id, "⏭️", `${doer.username} skipped a guess question`, c.question);
         endTurn(room);
@@ -651,8 +676,8 @@ function challengeAction(room, player, { action, hearts, text, note, picks } = {
       const value = cleanText(text, C.MAX_ANSWER_LENGTH);
       if (!value) return "Type something first";
 
-      if (action === "answer" && isDoer) c.answer = value;
-      else if (action === "guess" && !isDoer) c.guess = value;
+      if (action === "guess" && isDoer) c.guess = value;
+      else if (action === "answer" && !isDoer) c.answer = value;
       else return "";
 
       if (c.answer !== null && c.guess !== null) c.stage = "reveal";
@@ -660,8 +685,8 @@ function challengeAction(room, player, { action, hearts, text, note, picks } = {
     }
 
     case "reveal": {
-      // The person the question is about decides if the guess was right
-      if (!isDoer) return "";
+      // The partner (the question is about them) decides if the guess was right
+      if (isDoer) return "";
       if (action !== "match" && action !== "nomatch") return "";
 
       const matched = action === "match";
@@ -677,11 +702,12 @@ function challengeAction(room, player, { action, hearts, text, note, picks } = {
           partner.tally.guessMatches += 1;
           b = award(partner, c.points);
         }
-        addLog(room, doer.id, "🔮", `Match! ${partner?.username} knew ${doer.username}'s answer (+${a} / +${b})`, `${c.question} → “${c.answer}” / “${c.guess}”`);
+        addLog(room, doer.id, "🔮", `Match! ${doer.username} knew ${partner?.username}'s answer (+${a} / +${b})`, `${c.question} → “${c.answer}” / “${c.guess}”`);
       } else {
-        addLog(room, doer.id, "🤔", `No match: ${partner?.username} guessed “${c.guess}”, it was “${c.answer}”`, c.question);
+        addLog(room, doer.id, "🤔", `No match: ${doer.username} guessed “${c.guess}”, it was “${c.answer}”`, c.question);
       }
-      addMoment(room, { type: "guess", question: c.question, playerId: doer.id, partnerId: partner?.id, answer: c.answer, guess: c.guess, matched });
+      // doerGuessed: the player who landed guessed (older memories have it the other way round)
+      addMoment(room, { type: "guess", question: c.question, playerId: doer.id, partnerId: partner?.id, answer: c.answer, guess: c.guess, matched, doerGuessed: true });
       endTurn(room);
       return null;
     }
@@ -784,23 +810,23 @@ function guessMatches(guess, word) {
 function startMiniGame(room, c, doer, partner) {
   const m = c.mini;
   if (m.game === "finish") {
-    m.prompt = drawFrom(room, "mini:finish", MINI.finish);
+    m.prompt = fillPartner(drawFrom(room, "mini:finish", questionList(room, "finish", MINI.finish)), partner?.username);
     c.stage = "writing";
   } else if (m.game === "draw") {
-    m.word = drawFrom(room, "mini:draw", MINI.draw);
+    m.word = drawFrom(room, "mini:draw", questionList(room, "draw", MINI.draw));
     m.strokes = [];
     c.stage = "drawing";
     c.endsAt = Date.now() + C.DRAW_MS;
   } else {
     m.items = Array.from({ length: C.MINI_ROUNDS }, () => {
       if (m.game === "thisOrThat") {
-        const [a, b] = drawFrom(room, "mini:thisOrThat", MINI.thisOrThat);
+        const [a, b] = drawFrom(room, "mini:thisOrThat", questionList(room, "thisOrThat", MINI.thisOrThat));
         return { text: "", options: [a, b] };
       }
       if (m.game === "neverEver") {
-        return { text: `Never have I ever ${drawFrom(room, "mini:neverEver", MINI.neverEver)}`, options: ["🙋 I have", "🙅 Never"] };
+        return { text: fillPartner(`Never have I ever ${drawFrom(room, "mini:neverEver", questionList(room, "neverEver", MINI.neverEver))}`, partner?.username), options: ["🙋 I have", "🙅 Never"] };
       }
-      return { text: `Who's more likely to ${drawFrom(room, "mini:mostLikely", MINI.mostLikely)}?`, options: [doer.username, partner?.username ?? "You"] };
+      return { text: fillPartner(`Who's more likely to ${drawFrom(room, "mini:mostLikely", questionList(room, "mostLikely", MINI.mostLikely))}?`, partner?.username), options: [doer.username, partner?.username ?? "You"] };
     });
     m.picks = {};
     c.stage = "picking";
@@ -1048,6 +1074,7 @@ function usePowerUp(room, player, card, target) {
     }
     c.playerId = partner.id;
     c.handedOff = true;
+    c.question = fillPartner(c.template ?? c.question, player.username); // now it's about the one who passed it
     setEvent(room, player.id, `😈 ${player.username} passed the challenge to ${partner.username}!`);
     addLog(room, player.id, "😈", `${player.username} passed the ${TILE_LABEL[c.type]} to ${partner.username}`, c.question);
     return {};
@@ -1066,7 +1093,18 @@ function usePowerUp(room, player, card, target) {
   return { error: "Unknown card" };
 }
 
-const THEME_NAMES = { warm: "Warm Night", ocean: "Ocean", forest: "Forest", festive: "Festive" };
+const THEME_NAMES = {
+  warm: "Warm Night",
+  ocean: "Ocean",
+  forest: "Forest",
+  festive: "Festive",
+  midnight: "Midnight",
+  sakura: "Sakura",
+  sunset: "Sunset",
+  lavender: "Lavender",
+  mint: "Mint",
+  noir: "Noir",
+};
 
 // The room creator can restyle the room at any time; both screens update live
 function updateLook(room, player, { theme, a11y } = {}) {

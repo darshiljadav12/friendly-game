@@ -17,6 +17,7 @@ type Props = {
   onSettingsChange: (s: NewGameSettings) => void;
   // quick game
   initialJoinCode: string;
+  invite: { exists: boolean; isCouple?: boolean } | null; // what the invite link points to (null = still checking)
   onCreate: (username: string) => void;
   onJoin: (username: string, roomCode: string) => void;
   // account + couple
@@ -31,11 +32,20 @@ type Props = {
 };
 
 export default function Lobby(props: Props) {
-  const { connected, logo, errorBanner, onError, settings, onSettingsChange, initialJoinCode, session, account } = props;
+  const { connected, logo, errorBanner, onError, settings, onSettingsChange, initialJoinCode, invite, session, account } = props;
   const overview = account?.overview ?? null;
 
-  // An invite link opens the quick-join form, unless you're logged in as a couple
-  const [tab, setTab] = useState<"couple" | "quick">(initialJoinCode && !session ? "quick" : session ? "couple" : "couple");
+  // An invite to a quick game opens the quick-join form; a couple game shows the couple login
+  // (after logging in you go straight into that game). The tabs still work as normal.
+  const [tabChoice, setTabChoice] = useState<"couple" | "quick" | null>(null);
+  const tab = tabChoice ?? (initialJoinCode && invite?.exists && invite.isCouple === false ? "quick" : "couple");
+  const coupleInvite = initialJoinCode && invite?.exists && invite.isCouple ? initialJoinCode : null;
+  const inviteNote = coupleInvite && (
+    <p className="rounded-xl border border-gold/40 bg-gold/10 px-3 py-2.5 text-center text-sm">
+      💌 You&apos;re invited to game <b className="font-mono text-gold">{coupleInvite}</b>.{" "}
+      {session && account ? "Join your partner's couple below and you'll go straight in." : "Log in (or sign up) and you'll go straight into it."}
+    </p>
+  );
   const [username, setUsername] = useState("");
   const [roomCode, setRoomCode] = useState(initialJoinCode);
   const [showSettings, setShowSettings] = useState(false);
@@ -67,7 +77,7 @@ export default function Lobby(props: Props) {
               key={id}
               role="tab"
               aria-selected={tab === id}
-              onClick={() => setTab(id)}
+              onClick={() => setTabChoice(id)}
               className={`rounded-lg py-2 text-sm font-bold transition-colors ${tab === id ? "bg-surface-2 text-white shadow" : "text-muted hover:text-white"}`}
             >
               {label}
@@ -92,6 +102,7 @@ export default function Lobby(props: Props) {
             />
           ) : session && account ? (
             <>
+              {inviteNote}
               {errorBanner}
               <CoupleLink session={session} name={account.user.name} connected={connected} onLinked={props.onLinked} onLogout={props.onCoupleLogout} />
             </>
@@ -99,8 +110,12 @@ export default function Lobby(props: Props) {
             <p className="py-6 text-center text-sm text-muted">Loading your account…</p>
           ) : (
             <>
+              {inviteNote}
+              {initialJoinCode && invite && !invite.exists && (
+                <p className="rounded-xl border border-rose/40 bg-rose/10 px-3 py-2.5 text-center text-sm">This invite link has expired: the game {initialJoinCode} has ended.</p>
+              )}
               {errorBanner}
-              <AccountAuth connected={connected} onDone={props.onLogin} />
+              <AccountAuth key={coupleInvite ? "invite" : "plain"} connected={connected} onDone={props.onLogin} startWith={coupleInvite ? "login" : "signup"} />
             </>
           )
         ) : (

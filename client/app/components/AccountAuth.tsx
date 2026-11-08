@@ -8,8 +8,9 @@ type Done = (session: AccountSession, view: AccountView) => void;
 type Result = AccountView & { session?: AccountSession };
 
 // Each person has their own account: sign up once, then log in with username + password
-export default function AccountAuth({ connected, onDone }: { connected: boolean; onDone: Done }) {
-  const [mode, setMode] = useState<"signup" | "login">("signup");
+// startWith: "login" when arriving from an invite link (that person most likely has an account)
+export default function AccountAuth({ connected, onDone, startWith = "signup" }: { connected: boolean; onDone: Done; startWith?: "signup" | "login" }) {
+  const [mode, setMode] = useState<"signup" | "login">(startWith);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -17,6 +18,7 @@ export default function AccountAuth({ connected, onDone }: { connected: boolean;
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [password2, setPassword2] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   const submit = async () => {
     setError(null);
@@ -101,23 +103,40 @@ export default function AccountAuth({ connected, onDone }: { connected: boolean;
       <div className={mode === "signup" ? "grid grid-cols-2 gap-2" : ""}>
         <label className="block">
           <span className="panel-label">Password</span>
-          <input
-            value={password}
-            type="password"
-            maxLength={100}
-            onChange={(e) => setPassword(e.target.value)}
-            onKeyDown={onEnter}
-            className="field w-full mt-1.5 p-3"
-            placeholder="••••••"
-            autoComplete={mode === "signup" ? "new-password" : "current-password"}
-          />
+          <span className="relative mt-1.5 block">
+            <input
+              value={password}
+              type={showPassword ? "text" : "password"}
+              maxLength={100}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={onEnter}
+              className="field w-full p-3 pr-11"
+              placeholder="••••••"
+              autoComplete={mode === "signup" ? "new-password" : "current-password"}
+            />
+            {/* shows/hides both password fields */}
+            <button
+              type="button"
+              onClick={() => setShowPassword((v) => !v)}
+              aria-label={showPassword ? "Hide password" : "Show password"}
+              aria-pressed={showPassword}
+              title={showPassword ? "Hide password" : "Show password"}
+              className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-muted hover:text-white"
+            >
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" />
+                <circle cx="12" cy="12" r="3" />
+                {showPassword && <path d="M3 3l18 18" />}
+              </svg>
+            </button>
+          </span>
         </label>
         {mode === "signup" && (
           <label className="block">
             <span className="panel-label">Repeat password</span>
             <input
               value={password2}
-              type="password"
+              type={showPassword ? "text" : "password"}
               maxLength={100}
               onChange={(e) => setPassword2(e.target.value)}
               onKeyDown={onEnter}

@@ -6,7 +6,8 @@
 const crypto = require("crypto");
 const db = require("./db");
 const { lifetimeAchievements } = require("./achievements");
-const { MAX_NAME_LENGTH } = require("./config");
+const C = require("./config");
+const { MAX_NAME_LENGTH } = C;
 
 const CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no 0/O, 1/I/L
 const MAX_SESSIONS = 20; // devices remembered per account
@@ -64,10 +65,23 @@ async function generateCode() {
   }
 }
 
+// Summary of the admin setup for the couple home (the full question lists are fetched separately)
+function customSummary(custom) {
+  if (!custom) return null;
+  return {
+    counts: custom.counts,
+    miniGames: custom.miniGames,
+    theme: custom.theme,
+    questionCounts: Object.fromEntries(Object.entries(custom.questions ?? {}).map(([key, list]) => [key, list.length])),
+    updatedAt: custom.updatedAt,
+  };
+}
+
 // What clients may see about a couple (no usernames of the partner's sessions etc.)
 function overview(couple) {
   return {
     code: couple._id,
+    custom: customSummary(couple.custom),
     members: couple.members.map(({ slot, name }) => ({ slot, name })),
     iou: couple.iou,
     stats: couple.stats,
@@ -196,6 +210,94 @@ async function saveAvatar(code, slot, avatar) {
   if (!user) return;
   user.avatar = avatar;
   await db.saveUser(user);
+}
+
+/* =========================
+   ADMIN SETUP (couple's own board, questions, mini-games, theme)
+========================= */
+
+const cleanQuestion = (text) =>
+  typeof text === "string" || typeof text === "number" ? String(text).replace(/\s+/g, " ").trim().slice(0, C.MAX_QUESTION_LENGTH) : "";
+
+// One uploaded entry → what the game stores, or null to drop it
+function cleanEntry(key, raw) {
+  const text = cleanQuestion(raw);
+  if (!text) return null;
+  if (key === "thisOrThat") {
+    // "Beach / Mountains" (also accepts "or", "|" and "vs")
+    const parts = text.split(/\s*(?:\/|\||\bor\b|\bvs\.?)\s*/i).filter(Boolean);
+    return parts.length === 2 ? [parts[0], parts[1]] : null;
+  }
+  // The game adds these openings itself
+  if (key === "neverEver") return text.replace(/^never\s+have\s+i\s+ever\s*/i, "").trim() || null;
+  if (key === "mostLikely") return text.replace(/^who'?s\s+(more|most)\s+likely\s+to\s*/i, "").replace(/\?+$/, "").trim() || null;
+  return text;
+}
+
+// Checks what the admin panel sends; returns { custom } or { error }
+function validateCustom(input = {}) {
+  let counts = null;
+  if (input.counts) {
+    counts = {};
+    for (const type of C.TILE_TYPES) {
+      const n = Math.round(Number(input.counts[type] ?? 0));
+      if (!Number.isFinite(n) || n < 0 || n > C.BOARD_SIZE - 1) return { error: "Tile amounts must be between 0 and 27" };
+      counts[type] = n;
+    }
+    const total = Object.values(counts).reduce((sum, n) => sum + n, 0);
+    if (total !== C.BOARD_SIZE - 1) return { error: `The board needs exactly ${C.BOARD_SIZE - 1} tiles (you have ${total})` };
+  }
+
+  const miniGames = Array.isArray(input.miniGames) ? [...new Set(input.miniGames.filter((g) => Object.hasOwn(C.MINI_GAMES, g)))] : Object.keys(C.MINI_GAMES);
+  if (miniGames.length === 0 && (!counts || counts.play > 0)) return { error: "Turn on at least one mini-game, or set PLAY tiles to 0" };
+
+  const questions = {};
+  for (const key of C.QUESTION_LISTS) {
+    const list = input.questions?.[key];
+    if (!Array.isArray(list)) continue;
+    const seen = new Set();
+    const clean = [];
+    for (const raw of list) {
+      const entry = cleanEntry(key, raw);
+      const id = JSON.stringify(entry).toLowerCase();
+      if (!entry || seen.has(id)) continue;
+      seen.add(id);
+      clean.push(entry);
+      if (clean.length === C.MAX_CUSTOM_QUESTIONS) break;
+    }
+    if (clean.length) questions[key] = clean;
+  }
+
+  const theme = C.THEMES.includes(input.theme) ? input.theme : "warm";
+  return { custom: { counts, miniGames, questions, theme, updatedAt: new Date() } };
+}
+
+// Only the person who created the couple (slot 0) is the admin
+async function saveCustom(session, input) {
+  const auth = await authenticate(session);
+  if (!auth?.couple) return { error: "Log in to your couple account first" };
+  if (auth.slot !== 0) return { error: `Only ${auth.couple.members[0].name} (who created your couple) can change the game setup` };
+  const result = validateCustom(input);
+  if (result.error) return result;
+  auth.couple.custom = result.custom;
+  await db.saveCouple(auth.couple);
+  return { couple: auth.couple, custom: result.custom };
+}
+
+async function resetCustom(session) {
+  const auth = await authenticate(session);
+  if (!auth?.couple) return { error: "Log in to your couple account first" };
+  if (auth.slot !== 0) return { error: `Only ${auth.couple.members[0].name} can change the game setup` };
+  auth.couple.custom = null;
+  await db.saveCouple(auth.couple);
+  return { couple: auth.couple };
+}
+
+// Full setup including question lists (both partners may look)
+async function getCustom(session) {
+  const auth = await authenticate(session);
+  if (!auth?.couple) return { error: "Log in to your couple account first" };
+  return { custom: auth.couple.custom ?? null, isAdmin: auth.slot === 0 };
 }
 
 /* =========================
@@ -378,6 +480,10 @@ module.exports = {
   authenticate,
   logout,
   logoutOthers,
+  saveCustom,
+  resetCustom,
+  getCustom,
+  validateCustom,
   saveAvatar,
   accountView,
   overview,

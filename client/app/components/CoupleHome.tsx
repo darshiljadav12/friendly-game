@@ -2,11 +2,12 @@
 
 import { useState, type ReactNode } from "react";
 import GameSettings from "./GameSettings";
+import AdminPanel from "./AdminPanel";
 import { AchievementsTab, HistoryTab, IouWallet, MemoryBook, StatsTab } from "./CoupleTabs";
 import { playerTheme } from "../constants";
 import type { AccountSession, AchievementDef, CoupleOverview, NewGameSettings } from "../types";
 
-type Tab = "play" | "history" | "memories" | "stats" | "achievements" | "iou";
+type Tab = "play" | "history" | "memories" | "stats" | "achievements" | "iou" | "setup";
 
 type Props = {
   session: AccountSession;
@@ -46,6 +47,7 @@ export default function CoupleHome({ session, slot, overview, definitions, conne
     { id: "stats", label: "📊 Stats" },
     { id: "achievements", label: "🏅 Badges" },
     { id: "iou", label: `💌 IOU${owed ? ` (${owed})` : ""}` },
+    { id: "setup", label: "⚙️ Setup" },
   ];
 
   return (
@@ -77,8 +79,8 @@ export default function CoupleHome({ session, slot, overview, definitions, conne
         </div>
       ) : (
         <>
-          {/* PARTNER WAITING IN A GAME */}
-          {overview.activeRoomId && (
+          {/* A GAME IS ALREADY RUNNING (shown on the other tabs; the Play tab explains it) */}
+          {overview.activeRoomId && tab !== "play" && (
             <button onClick={() => onJoin(overview.activeRoomId!)} disabled={!connected} className="btn btn-gold w-full p-3">
               💌 Join your game ({overview.activeRoomId})
             </button>
@@ -101,9 +103,20 @@ export default function CoupleHome({ session, slot, overview, definitions, conne
           {errorBanner}
 
           <div role="tabpanel">
-            {tab === "play" && (
+            {tab === "play" && overview.activeRoomId && (
+              // One game per couple: whoever didn't start it just joins with the code
+              <div className="space-y-3 rounded-2xl border border-gold/40 bg-gold/10 p-4 text-center">
+                <p className="text-sm">Your game is ready! Join it with this code:</p>
+                <p className="rounded-xl bg-sunken py-3 font-mono text-3xl font-black tracking-[0.2em] text-gold">{overview.activeRoomId}</p>
+                <button onClick={() => onJoin(overview.activeRoomId!)} disabled={!connected} className="btn btn-gold w-full p-3">
+                  💌 Join your game
+                </button>
+                <p className="text-[11px] text-muted">You can start a new game once this one has ended.</p>
+              </div>
+            )}
+            {tab === "play" && !overview.activeRoomId && (
               <div className="space-y-4">
-                <GameSettings value={settings} onChange={onSettingsChange} />
+                <GameSettings value={settings} onChange={onSettingsChange} ourBoard={overview.custom?.counts ?? null} />
                 <button onClick={onStart} disabled={!connected} className="btn btn-primary w-full p-3">
                   Start a new game
                 </button>
@@ -117,6 +130,7 @@ export default function CoupleHome({ session, slot, overview, definitions, conne
             {tab === "stats" && <StatsTab overview={overview} />}
             {tab === "achievements" && <AchievementsTab overview={overview} definitions={definitions} />}
             {tab === "iou" && <IouWallet session={session} slot={slot} overview={overview} />}
+            {tab === "setup" && <AdminPanel session={session} overview={overview} />}
           </div>
         </>
       )}

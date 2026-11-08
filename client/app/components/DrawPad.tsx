@@ -55,7 +55,10 @@ export default function DrawPad({ canDraw, onWord }: { canDraw: boolean; onWord?
     const canvas = canvasRef.current;
     if (!canvas) return;
     const resize = () => {
-      const px = Math.round(canvas.getBoundingClientRect().width * (window.devicePixelRatio || 1));
+      // offsetWidth is the layout size: unlike getBoundingClientRect it ignores transforms, so a card
+      // that is still flipping in (3D rotated, nearly 0px wide on screen) can't give a tiny, blurry canvas
+      const px = Math.round(canvas.offsetWidth * (window.devicePixelRatio || 1));
+      if (px === 0) return;
       if (px === canvas.width) return;
       canvas.width = px;
       canvas.height = px;

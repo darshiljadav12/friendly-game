@@ -4,7 +4,7 @@ import { useEffect, useState, type Ref } from "react";
 import MiniGame from "./MiniGame";
 import { MINI_GAME_INFO, POWER_UP_INFO, TILE_INFO, TILE_THEMES, needsMyAction, tileStyle } from "../constants";
 import { sound } from "../../lib/sound";
-import type { Challenge, GameState, PowerUp } from "../types";
+import type { Challenge, ChallengeType, GameState, PowerUp } from "../types";
 
 export type ChallengeAction =
   | "done"
@@ -154,6 +154,25 @@ export default function ChallengeCard({ ref, game, challenge: c, myId, timerEnds
         ? `${owner?.username} passed it to ${isDoer ? "you" : doer?.username} 😈`
         : `${isDoer ? "Your" : `${doer?.username}'s`} challenge`;
 
+  // "Who does what" line under the title, e.g. "You guess · Bob has the real answer and decides"
+  const who = (p: typeof doer, you: string, they: string) => (p?.id === myId ? `You ${you}` : `${p?.username} ${they}`);
+  const partnerWord = partnerOfDoer?.id === myId ? "you" : partnerOfDoer?.username;
+  const roles = c.mini
+    ? c.mini.game === "finish"
+      ? `${who(doer, "finish the sentence", "finishes the sentence")} · ${who(partnerOfDoer, "rate it", "rates it")}`
+      : c.mini.game === "draw"
+        ? `${who(doer, "draw", "draws")} · ${who(partnerOfDoer, "guess", "guesses")}`
+        : "You both pick in secret · matching picks score"
+    : {
+        love: `${who(doer, "answer out loud", "answers out loud")} · ${who(partnerOfDoer, "rate it", "rates it")}`,
+        memory: `${who(doer, "share it", "shares it")} · ${who(partnerOfDoer, "rate it", "rates it")}`,
+        dare: who(doer, "do the dare", "does the dare"),
+        gift: `${who(doer, "do it for", "does it for")} ${partnerWord}`,
+        timed: who(doer, "race the 30s clock", "races the 30s clock"),
+        guess: `${who(doer, "guess", "guesses")} · ${who(partnerOfDoer, "have the real answer and decide", "has the real answer and decides")}`,
+        together: "You both do it, then both tap the button",
+      }[c.type as Exclude<ChallengeType, "play">];
+
   let body: React.ReactNode = null;
 
   if (c.mini && c.stage !== "rating") {
@@ -173,25 +192,26 @@ export default function ChallengeCard({ ref, game, challenge: c, myId, timerEnds
       </div>
     );
   } else if (c.stage === "guessing") {
+    // The question is about the partner: the player who landed guesses, the partner types the real answer
     if (isDoer) {
-      body = c.hasAnswer ? (
-        <Waiting>Locked in. Waiting for {partnerOfDoer?.username}&apos;s guess…</Waiting>
+      body = c.hasGuess ? (
+        <Waiting>Guess locked in. Waiting for {partnerOfDoer?.username}&apos;s real answer…</Waiting>
       ) : (
         <>
-          <p className="mt-3 text-xs text-muted">Type your real answer. {partnerOfDoer?.username} will try to guess it.</p>
-          <TextEntry placeholder="Your answer (secret)" button="Lock in" onSubmit={(text) => onAction("answer", { text })} />
+          <p className="mt-3 text-xs text-muted">How well do you know {partnerOfDoer?.username}? Type your guess.</p>
+          <TextEntry placeholder="Your guess" button="Guess" onSubmit={(text) => onAction("guess", { text })} />
           <button onClick={() => onAction("skip")} className="mt-3 text-xs text-muted underline hover:text-white">
             Skip this one
           </button>
         </>
       );
     } else {
-      body = c.hasGuess ? (
-        <Waiting>Guess locked in. Waiting for {doer?.username}&apos;s answer…</Waiting>
+      body = c.hasAnswer ? (
+        <Waiting>Locked in. Waiting for {doer?.username}&apos;s guess…</Waiting>
       ) : (
         <>
-          <p className="mt-3 text-xs text-muted">How well do you know {doer?.username}? Type your guess.</p>
-          <TextEntry placeholder="Your guess" button="Guess" onSubmit={(text) => onAction("guess", { text })} />
+          <p className="mt-3 text-xs text-muted">It&apos;s about you! Type your real answer. {doer?.username} is trying to guess it.</p>
+          <TextEntry placeholder="Your answer (secret)" button="Lock in" onSubmit={(text) => onAction("answer", { text })} />
         </>
       );
     }
@@ -200,15 +220,15 @@ export default function ChallengeCard({ ref, game, challenge: c, myId, timerEnds
       <>
         <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
           <div className="rounded-xl bg-sunken p-3">
-            <p className="panel-label">{doer?.username}&apos;s answer</p>
+            <p className="panel-label">{partnerOfDoer?.username}&apos;s answer</p>
             <p className="mt-1 font-semibold">{c.answer}</p>
           </div>
           <div className="rounded-xl bg-sunken p-3">
-            <p className="panel-label">{partnerOfDoer?.username}&apos;s guess</p>
+            <p className="panel-label">{doer?.username}&apos;s guess</p>
             <p className="mt-1 font-semibold">{c.guess}</p>
           </div>
         </div>
-        {isDoer ? (
+        {!isDoer ? (
           <div className="mt-4 flex gap-3">
             <button onClick={() => onAction("match")} className="btn btn-primary flex-1 py-2.5">
               It&apos;s a match!
@@ -218,7 +238,7 @@ export default function ChallengeCard({ ref, game, challenge: c, myId, timerEnds
             </button>
           </div>
         ) : (
-          <Waiting>{doer?.username} is deciding if you got it…</Waiting>
+          <Waiting>{partnerOfDoer?.username} is deciding if you got it…</Waiting>
         )}
       </>
     );
@@ -324,6 +344,7 @@ export default function ChallengeCard({ ref, game, challenge: c, myId, timerEnds
       <div className="p-4">
         <p className="panel-label">{title}</p>
         <p className="mt-2 text-lg font-semibold leading-snug">{c.question}</p>
+        {roles && <p className="mt-1.5 text-[11px] font-semibold text-gold">👉 {roles}</p>}
 
         {body}
 

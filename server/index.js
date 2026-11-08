@@ -16,6 +16,8 @@ const db = require("./db");
 const game = require("./game");
 const couples = require("./couples");
 const achievements = require("./achievements");
+const QUESTIONS = require("./questions");
+const MINI = require("./minigames");
 
 const PORT = process.env.PORT || 5000;
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || "*";
@@ -235,6 +237,39 @@ io.on("connection", (socket) => {
     }, "Couldn't join the couple, try again"),
   );
 
+  /* -------- INVITE LINKS -------- */
+  // What an invite link points to, so the lobby can show the couple login or the quick-game form
+  socket.on("roomInfo", (code, ack) => {
+    const room = rooms[typeof code === "string" ? code.trim().toUpperCase() : ""];
+    reply(ack, room ? { exists: true, isCouple: Boolean(room.coupleCode), full: room.players.length >= C.MAX_PLAYERS } : { exists: false });
+  });
+
+  /* -------- ADMIN SETUP (couple creator) -------- */
+  // Built-in question lists, used to pre-fill the downloadable Excel template
+  socket.on("questionDefaults", (_payload, ack) => reply(ack, { questions: { ...QUESTIONS, ...MINI } }));
+
+  socket.on("coupleCustom", guarded((session) => couples.getCustom(session), "Couldn't load the game setup"));
+
+  socket.on(
+    "coupleSaveCustom",
+    guarded(async ({ session, custom }) => {
+      const result = await couples.saveCustom(session, custom);
+      if (result.error) return result;
+      pushCouple(result.couple); // both screens see the new setup
+      return { ok: true };
+    }, "Couldn't save the game setup"),
+  );
+
+  socket.on(
+    "coupleResetCustom",
+    guarded(async (session) => {
+      const result = await couples.resetCustom(session);
+      if (result.error) return result;
+      pushCouple(result.couple);
+      return { ok: true };
+    }, "Couldn't reset the game setup"),
+  );
+
   socket.on("coupleHistory", async (session, ack) => {
     const auth = await authCouple(session).catch(() => null);
     if (!auth) return reply(ack, { error: "Session expired, please log in again" });
@@ -283,19 +318,25 @@ io.on("connection", (socket) => {
     let name = game.cleanText(username, C.MAX_NAME_LENGTH);
     let coupleCode = null;
     let slot = null;
+    let custom = null; // the couple's admin setup (own board, questions, mini-games)
 
     if (couple) {
       const auth = await authCouple(couple).catch(() => null);
       if (!auth) return fail("Session expired, please log in again");
       if (auth.couple.members.length < 2) return fail("Your partner hasn't joined your couple yet. Share your couple code with them");
       coupleCode = auth.couple._id;
+      custom = auth.couple.custom ?? null;
+      // One game per couple at a time: the other one joins it instead of starting a second game
+      const running = auth.couple.activeRoomId && rooms[auth.couple.activeRoomId];
+      if (running) return fail(`You already have a game running (code ${running.id}). Join it instead`);
       slot = auth.slot;
       name = auth.couple.members[slot].name;
       avatar = auth.user.avatar ?? avatar; // couple accounts remember their pick
     }
     if (!name) return fail("Please enter your name");
 
-    const room = game.createRoom(generateRoomId(), game.parseSettings(settings), coupleCode);
+    const content = custom ? { questions: custom.questions, miniGames: custom.miniGames } : null;
+    const room = game.createRoom(generateRoomId(), game.parseSettings(settings, custom), coupleCode, content);
     const player = game.createPlayer(playerId, name, socket.id, slot, game.pickAvatar(room, avatar));
     room.creatorId = player.id;
     room.players.push(player);

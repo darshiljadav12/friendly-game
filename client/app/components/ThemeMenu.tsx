@@ -45,7 +45,7 @@ export default function ThemeMenu({
         <div className="panel absolute right-0 top-full z-50 mt-2 w-72 p-3" style={{ background: "var(--surface)" }}>
           <p className="panel-label">Room theme</p>
           <p className="mb-2 text-[10px] text-muted">You created this room, so only you can change it. Both screens update.</p>
-          <div className="grid grid-cols-2 gap-1.5">
+          <div className="grid grid-cols-5 gap-1">
             {THEMES.map((t) => (
               <button
                 key={t.value}
@@ -54,7 +54,7 @@ export default function ThemeMenu({
                 className={`rounded-xl border p-1.5 text-center transition-colors ${theme === t.value ? "border-gold" : "border-line hover:border-line-strong"}`}
               >
                 <span className="block h-5 w-full rounded-md" style={{ background: `linear-gradient(135deg, ${t.swatch[0]} 40%, ${t.swatch[1]})` }} />
-                <span className="mt-1 block text-[10px] font-semibold">{t.label}</span>
+                <span className="mt-1 block truncate text-[9px] font-semibold">{t.label}</span>
               </button>
             ))}
           </div>

@@ -143,7 +143,12 @@ const BOARD_PRESETS = {
 };
 const MAX_TILE_WEIGHT = 5;
 
-const THEMES = ["warm", "ocean", "forest", "festive"];
+const THEMES = ["warm", "ocean", "forest", "festive", "midnight", "sakura", "sunset", "lavender", "mint", "noir"];
+
+// Couple admin panel: own questions (uploaded from Excel/CSV) replace the built-in ones per list
+const QUESTION_LISTS = ["love", "dare", "memory", "gift", "guess", "timed", "together", "finish", "neverEver", "mostLikely", "thisOrThat", "draw"];
+const MAX_CUSTOM_QUESTIONS = 200; // per list
+const MAX_QUESTION_LENGTH = 160;
 const A11Y_KEYS = ["reduceMotion", "largeText", "highContrast", "colorBlind"];
 
 module.exports = {
@@ -188,5 +193,8 @@ module.exports = {
   BOARD_PRESETS,
   MAX_TILE_WEIGHT,
   THEMES,
+  QUESTION_LISTS,
+  MAX_CUSTOM_QUESTIONS,
+  MAX_QUESTION_LENGTH,
   A11Y_KEYS,
 };

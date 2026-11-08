@@ -173,7 +173,8 @@ export default function MiniGame({ game, challenge: c, myId, timerEndsAt, onActi
     case "writing":
       return (
         <>
-          <p className="mt-3 rounded-xl bg-sunken p-3 text-base font-semibold italic">“{m.prompt}”</p>
+          <p className="mt-3 text-xs text-muted">{isDoer ? `Finish this sentence for ${partner?.username}:` : `${doer?.username} is finishing this for you:`}</p>
+          <p className="mt-1.5 rounded-xl bg-sunken p-3 text-base font-semibold italic">“{m.prompt}”</p>
           {isDoer ? (
             <SendBox placeholder="Finish the sentence…" button="Done" onSend={(text) => onAction("answer", { text })} />
           ) : (

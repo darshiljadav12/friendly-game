@@ -89,9 +89,9 @@ export type GameMode = "competitive" | "coop";
 
 export type GameLength = "5" | "10" | "20" | "points150";
 
-export type BoardPreset = "classic" | "romantic" | "daring" | "chill" | "random" | "custom";
+export type BoardPreset = "classic" | "romantic" | "daring" | "chill" | "random" | "custom" | "ours"; // ours = the couple admin's exact tile counts
 
-export type ThemeName = "warm" | "ocean" | "forest" | "festive";
+export type ThemeName = "warm" | "ocean" | "forest" | "festive" | "midnight" | "sakura" | "sunset" | "lavender" | "mint" | "noir";
 
 export type A11yKey = "reduceMotion" | "largeText" | "highContrast" | "colorBlind";
 
@@ -239,6 +239,42 @@ export type CoupleOverview = {
   achievements: Record<"0" | "1", Record<string, string>>; // id -> unlocked date
   activeRoomId: string | null;
   createdAt: string;
+  custom: CustomSummary | null; // the admin's game setup
+};
+
+/* ---------- couple admin panel ---------- */
+
+export type QuestionListKey =
+  | "love"
+  | "dare"
+  | "memory"
+  | "gift"
+  | "guess"
+  | "timed"
+  | "together"
+  | "finish"
+  | "neverEver"
+  | "mostLikely"
+  | "thisOrThat"
+  | "draw";
+
+// This or That entries are pairs, everything else is plain text
+export type QuestionEntry = string | [string, string];
+
+export type CustomSetup = {
+  counts: Record<PlayableTile, number> | null; // null = use the normal board presets
+  miniGames: MiniGameName[];
+  questions: Partial<Record<QuestionListKey, QuestionEntry[]>>; // a list here replaces the built-in one
+  theme: ThemeName;
+  updatedAt?: string;
+};
+
+export type CustomSummary = {
+  counts: Record<PlayableTile, number> | null;
+  miniGames: MiniGameName[];
+  theme: ThemeName;
+  questionCounts: Partial<Record<QuestionListKey, number>>;
+  updatedAt: string;
 };
 
 export type HistoryGame = {
@@ -262,6 +298,7 @@ export type Memory = {
   answer?: string | null;
   guess?: string | null;
   matched?: boolean;
+  doerGuessed?: boolean; // Guess rounds: the player who landed guessed (older memories: their partner did)
   hearts?: number;
   note?: string | null;
   inTime?: boolean;

@@ -18,9 +18,11 @@ const chip = (active: boolean) =>
 export default function GameSettings({
   value,
   onChange,
+  ourBoard = null,
 }: {
   value: NewGameSettings;
   onChange: (next: NewGameSettings) => void;
+  ourBoard?: Record<PlayableTile, number> | null; // the couple admin's exact tile counts, when set
 }) {
   const set = (patch: Partial<NewGameSettings>) => onChange({ ...value, ...patch });
 
@@ -83,6 +85,25 @@ export default function GameSettings({
       {/* BOARD */}
       <fieldset>
         <legend className="panel-label mb-1.5">Board</legend>
+        {ourBoard && (
+          <button
+            type="button"
+            onClick={() => set({ board: { preset: "ours", weights: null } })}
+            aria-pressed={value.board.preset === "ours"}
+            className={`mb-1.5 w-full rounded-xl border px-2.5 py-2 text-left transition-colors ${
+              value.board.preset === "ours" ? "border-gold bg-gold/10" : "border-line bg-surface hover:border-line-strong"
+            }`}
+          >
+            <div className="text-xs font-bold">⭐ Our board</div>
+            <div className="mt-1 flex flex-wrap gap-1">
+              {PLAYABLE_TILES.filter((t) => ourBoard[t] > 0).map((t) => (
+                <span key={t} className="rounded-md px-1.5 py-0.5 text-[10px] font-semibold" style={tileStyle(t)}>
+                  {TILE_THEMES[t].icon} {ourBoard[t]}
+                </span>
+              ))}
+            </div>
+          </button>
+        )}
         <div className="grid grid-cols-3 gap-1.5">
           {BOARD_PRESETS.map((p) => (
             <button
@@ -132,7 +153,7 @@ export default function GameSettings({
       {/* THEME */}
       <fieldset>
         <legend className="panel-label mb-1.5">Theme</legend>
-        <div className="grid grid-cols-4 gap-1.5">
+        <div className="grid grid-cols-5 gap-1.5">
           {THEMES.map((t) => (
             <button
               key={t.value}

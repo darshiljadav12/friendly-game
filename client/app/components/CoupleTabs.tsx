@@ -175,8 +175,8 @@ export function MemoryBook({ session, overview }: { session: AccountSession; ove
 
                   {m.type === "guess" ? (
                     <p className="mt-1 text-xs">
-                      <span className="text-muted">{nameOf(overview, m.slot)}:</span> “{m.answer}” ·{" "}
-                      <span className="text-muted">{nameOf(overview, m.partnerSlot)} guessed:</span> “{m.guess}” {m.matched ? "✅" : "❌"}
+                      <span className="text-muted">{nameOf(overview, m.doerGuessed ? m.partnerSlot : m.slot)}:</span> “{m.answer}” ·{" "}
+                      <span className="text-muted">{nameOf(overview, m.doerGuessed ? m.slot : m.partnerSlot)} guessed:</span> “{m.guess}” {m.matched ? "✅" : "❌"}
                     </p>
                   ) : (
                     <p className="mt-1 text-xs text-muted">

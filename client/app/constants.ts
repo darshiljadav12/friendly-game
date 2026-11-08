@@ -28,11 +28,12 @@ export function needsMyAction(c: Challenge | null | undefined, myId: string) {
     return isDoer; // pending (start), writing, results (continue)
   }
   switch (c.stage) {
-    case "guessing":
-      return isDoer ? !c.hasAnswer : !c.hasGuess;
+    case "guessing": // the player who landed guesses, the partner types the real answer
+      return isDoer ? !c.hasGuess : !c.hasAnswer;
     case "rating":
+    case "reveal": // the partner decides if the guess matches
       return !isDoer;
-    default: // pending, timing, reveal
+    default: // pending, timing
       return isDoer;
   }
 }
@@ -80,6 +81,12 @@ export const THEMES: { value: ThemeName; label: string; swatch: [string, string]
   { value: "ocean", label: "Ocean", swatch: ["#0b2236", "#38bdf8"] },
   { value: "forest", label: "Forest", swatch: ["#10251c", "#4ade80"] },
   { value: "festive", label: "Festive", swatch: ["#3a0d12", "#fbbf24"] },
+  { value: "midnight", label: "Midnight", swatch: ["#0f1230", "#818cf8"] },
+  { value: "sakura", label: "Sakura", swatch: ["#3b1830", "#f9a8d4"] },
+  { value: "sunset", label: "Sunset", swatch: ["#3a1712", "#fb923c"] },
+  { value: "lavender", label: "Lavender", swatch: ["#26183d", "#c4b5fd"] },
+  { value: "mint", label: "Mint", swatch: ["#0d2826", "#5eead4"] },
+  { value: "noir", label: "Noir", swatch: ["#141414", "#e5c07b"] },
 ];
 
 export const A11Y_OPTIONS: { key: A11yKey; icon: string; label: string; desc: string }[] = [

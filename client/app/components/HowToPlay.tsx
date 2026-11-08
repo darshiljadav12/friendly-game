@@ -149,6 +149,9 @@ const SECTIONS: Section[] = [
     icon: "🟪",
     body: (
       <div className="space-y-2.5">
+        <p className="text-xs text-muted">
+          Every card is written for the player <b>whose turn it is</b> (&quot;you&quot;) and uses your partner&apos;s name, and the gold <b>👉 line</b> under the question says who does what (&quot;You guess · Bob has the real answer and decides&quot;).
+        </p>
         <TileRow type="love" name="Love" points="5 / 10 / 15">
           <li>Answer out loud (or on a call), then tap <b>Done</b>. Your partner rates it: ❤️ = 5, ❤️❤️ = 10, ❤️❤️❤️ = 15.</li>
           <li>The game waits for the rating; their phone buzzes. <b>Skip</b> gives 0.</li>
@@ -164,9 +167,9 @@ const SECTIONS: Section[] = [
           <li>Do the sweet gesture, then <b>Done</b> for 15, or <b>Skip</b>.</li>
         </TileRow>
         <TileRow type="guess" name="Guess" points="15 each">
-          <li>The question is about <b>you</b>, the player who landed. You type your real answer and your partner types a guess (80 characters max).</li>
-          <li>Neither text is shown until <b>both are locked in</b>. Then <b>you</b> decide: <b>It&apos;s a match!</b> gives both of you 15, <b>Not quite</b> gives 0.</li>
-          <li>You can skip before locking in your answer.</li>
+          <li>The question is about <b>your partner</b> (&quot;What&apos;s Bob&apos;s favourite food?&quot;). <b>You</b> type a guess and <b>your partner</b> types their real answer (80 characters max).</li>
+          <li>Neither text is shown until <b>both are locked in</b>. Then <b>your partner</b> decides: <b>It&apos;s a match!</b> gives both of you 15, <b>Not quite</b> gives 0.</li>
+          <li>You can skip before locking in your guess.</li>
         </TileRow>
         <TileRow type="timed" name="Timed" points="30 / 15">
           <li>Tap <b>▶ Start 30s timer</b>; it counts down on both screens. Done within 30 s (1 s grace for lag) = <b>30</b>; later = <b>15</b>.</li>
@@ -398,6 +401,19 @@ const SECTIONS: Section[] = [
             </li>
           ))}
           <li>Always START + 27 tiles. Every board except Classic is reshuffled for each new game, including Play again. &quot;Tiles on this board&quot; lists what&apos;s in play.</li>
+          <li><b>⭐ Our board</b> (couple games): exactly the tile amounts set in ⚙️ Setup, shuffled for every game.</li>
+        </List>
+
+        <H>⚙️ Setup (couple admin)</H>
+        <List>
+          <li>The person who <b>created the couple</b> is its admin. The ⚙️ Setup tab on the couple home lets them choose, for all your couple games:</li>
+          <li><b>Board</b>: exactly how many tiles of each type (27 in total). 0 turns a tile type off.</li>
+          <li><b>Mini-games</b>: which ones the 🎮 PLAY tile can pick (at least one while there are PLAY tiles).</li>
+          <li><b>Questions</b>: upload an Excel (.xlsx) or CSV file with the column names in the first row (Love, Dare, Memory, Gift, Guess, Timed, Together, Finish My Sentence, Never Have I Ever, Who&apos;s More Likely, This or That, Draw It) and one question per row. A list you upload <b>replaces</b> the built-in questions of that type; the others stay built-in. Up to 200 per list, 160 characters each; duplicates are skipped. This or That needs both options in one cell, like &quot;Beach / Mountains&quot;.</li>
+          <li><b>⬇️ Download template</b> gives a sheet already filled with the current questions, ready to edit and upload back.</li>
+          <li>Write cards for the player <b>whose turn it is</b> (&quot;you&quot;) and use <b>{"{partner}"}</b> for the other person: it&apos;s replaced with their name in the game. Guess questions are about the partner (&quot;What&apos;s {"{partner}"}&apos;s favourite food?&quot;).</li>
+          <li><b>Theme</b>: the theme new games start with (the game&apos;s creator can still change it with 🎨 during the game).</li>
+          <li>Changes apply to <b>new</b> games; a running game keeps its setup. Your partner can see the setup but not change it. &quot;Reset everything&quot; goes back to the built-in setup.</li>
         </List>
 
         <H>Theme</H>
